@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polymarket-tools"
+version = "0.1.0"
+description = "Polymarket CLOB scanner and query tools for OpenClaw"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.28",
+    "sqlalchemy>=2.0",
+]
+
+[project.optional-dependencies]
+openclaw = ["openclaw-sdk"]
+
+[tool.setuptools.packages.find]
+include = ["polymarket_tools*"]

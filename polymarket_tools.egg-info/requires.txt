@@ -1,0 +1,4 @@
+requests>=2.28
+
+[openclaw]
+openclaw-sdk
