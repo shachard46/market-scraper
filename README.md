@@ -20,7 +20,7 @@ python -m polymarket_tools get_all_markets
 | `poll [--interval M] [--limit N]` | Run background polling loop |
 | `get_all_markets [--limit N]` | List markets |
 | `get_market_trends <market_id> [--limit N]` | Price/volume history |
-| `get_category_markets <category> [--limit N]` | Markets by category |
+| `get_category_markets <category> [category ...] [--limit N]` | Markets by category (supports multiple) |
 
 ## Configuration
 

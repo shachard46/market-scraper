@@ -46,16 +46,16 @@ python -m polymarket_tools get_market_trends <market_id> [--limit N]
 
 ### get_category_markets
 
-List markets filtered by category (from Polymarket tags).
+List markets filtered by category (from Polymarket tags). Supports multiple categories.
 
 ```bash
-python -m polymarket_tools get_category_markets <category_name> [--limit N]
+python -m polymarket_tools get_category_markets <category> [category ...] [--limit N]
 ```
 
-- `category_name`: Value of `market_category` (e.g., `Politics`, `Sports`, `All`).
+- `category`: One or more values of `market_category` (e.g., `Politics`, `Sports`, `All`). Markets matching any category are returned.
 - `--limit`: Max markets to return (default 50).
 
-**When to use:** User asks for "Politics markets," "sports prediction markets," or "markets in category X."
+**When to use:** User asks for "Politics markets," "sports prediction markets," "markets in Politics or Sports," or "markets in category X."
 
 ---
 

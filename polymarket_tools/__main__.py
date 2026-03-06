@@ -111,13 +111,13 @@ def _cmd_get_market_trends(args: argparse.Namespace) -> int:
 
 
 def _cmd_get_category_markets(args: argparse.Namespace) -> int:
-    """List markets by category."""
-    category = getattr(args, "category", None)
-    if not category:
-        print("Error: category required", file=sys.stderr)
+    """List markets by category (one or more)."""
+    categories = getattr(args, "categories", None)
+    if not categories:
+        print("Error: at least one category required", file=sys.stderr)
         return 1
     limit = getattr(args, "limit", 50)
-    data = tools.get_category_markets(category_name=category, limit=limit)
+    data = tools.get_category_markets(category_names=categories, limit=limit)
     print(json.dumps(data, indent=2))
     return 0
 
@@ -202,7 +202,7 @@ def main() -> int:
     t_p.set_defaults(handler=_cmd_get_market_trends)
 
     c_p = sub.add_parser("get_category_markets")
-    c_p.add_argument("category", help="Market category (e.g., from tags)")
+    c_p.add_argument("categories", nargs="+", help="Market category or categories (e.g., Politics Sports)")
     c_p.add_argument("--limit", type=int, default=50)
     c_p.set_defaults(handler=_cmd_get_category_markets)
 

@@ -127,21 +127,21 @@ def get_market_trends(market_id: str, limit: int = 50) -> list[dict]:
     return [_model_to_dict(r) for r in rows]
 
 
-def get_category_markets(category_name: str, limit: int = 50) -> list[dict]:
+def get_category_markets(category_names: list[str], limit: int = 50) -> list[dict]:
     """
     Return markets filtered by market_category.
 
     Args:
-        category_name: Value of market_category (e.g., Politics, Sports, All).
+        category_names: One or more values of market_category (e.g., Politics, Sports, All).
         limit: Maximum number of markets to return. Default 50.
 
     Returns:
-        List of market dicts matching the category.
+        List of market dicts matching any of the categories.
     """
     with db.get_session() as session:
         stmt = (
             select(Market)
-            .where(Market.market_category == category_name)
+            .where(Market.market_category.in_(category_names))
             .order_by(Market.change_id.desc())
             .limit(limit)
         )
