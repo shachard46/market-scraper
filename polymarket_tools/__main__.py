@@ -10,7 +10,8 @@ Commands:
     get_category_markets  List markets by category
     get_closed_markets   List closed/resolved markets
     get_open_markets     List open/active markets
-    query_market_field   Get a single field value for a market
+    get_market          Get full market details (including enriched fields)
+    query_market_field  Get a single field value for a market
 """
 
 import argparse
@@ -31,6 +32,18 @@ def _cmd_setup(_: argparse.Namespace) -> int:
 
 def _cmd_scan(args: argparse.Namespace) -> int:
     """Run a single scan."""
+    market_id = getattr(args, "market", None)
+    if market_id:
+        try:
+            ok = scanner.scan_single_market(market_id)
+            if ok:
+                print(f"Scanned market: {market_id}", file=sys.stderr)
+                return 0
+            print(f"Market not found: {market_id}", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"Scan failed: {e}", file=sys.stderr)
+            return 1
     limit = getattr(args, "limit", None)
     active_only = getattr(args, "active_only", True)
     try:
@@ -110,6 +123,20 @@ def _cmd_get_open_markets(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_get_market(args: argparse.Namespace) -> int:
+    """Get full market details including enriched fields."""
+    market_id = getattr(args, "market_id", None)
+    if not market_id:
+        print("Error: market_id required", file=sys.stderr)
+        return 1
+    data = tools.get_market(market_id=market_id)
+    if data is None:
+        print(f"Market not found: {market_id}", file=sys.stderr)
+        return 1
+    print(json.dumps(data, indent=2))
+    return 0
+
+
 def _cmd_query_market_field(args: argparse.Namespace) -> int:
     """Get a single field value for a market."""
     market_id = getattr(args, "market_id", None)
@@ -135,6 +162,7 @@ def main() -> int:
     scan_p = sub.add_parser("scan")
     scan_p.add_argument("--limit", type=int, default=None, help="Max markets to scan (default: all)")
     scan_p.add_argument("--all", action="store_false", dest="active_only", help="Include closed/archived markets")
+    scan_p.add_argument("--market", type=str, default=None, help="Scan single market by condition_id or slug")
     scan_p.set_defaults(handler=_cmd_scan)
 
     poll_p = sub.add_parser("poll")
@@ -164,6 +192,10 @@ def main() -> int:
     open_p = sub.add_parser("get_open_markets")
     open_p.add_argument("--limit", type=int, default=50)
     open_p.set_defaults(handler=_cmd_get_open_markets)
+
+    gm_p = sub.add_parser("get_market")
+    gm_p.add_argument("market_id", help="Polymarket condition_id")
+    gm_p.set_defaults(handler=_cmd_get_market)
 
     qf_p = sub.add_parser("query_market_field")
     qf_p.add_argument("market_id", help="Polymarket condition_id")

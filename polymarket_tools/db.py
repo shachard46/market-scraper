@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime as dt
 from typing import Generator
 
-from sqlalchemy import DateTime, create_engine, ForeignKey
+from sqlalchemy import DateTime, create_engine, ForeignKey, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, sessionmaker
 
 # Default DB path; override via POLYMARKET_DB_PATH env var
@@ -62,6 +62,15 @@ class Market(Base):
     )
     outcome: Mapped[str | None] = mapped_column(nullable=True)
     market_category: Mapped[str] = mapped_column(nullable=False)
+    # Enriched columns: populated only when scraped via single-market fetch
+    volume: Mapped[float | None] = mapped_column(nullable=True)
+    liquidity: Mapped[float | None] = mapped_column(nullable=True)
+    start_date: Mapped[dt | None] = mapped_column(DateTime, nullable=True)
+    category: Mapped[str | None] = mapped_column(nullable=True)
+    tags: Mapped[str | None] = mapped_column(nullable=True)  # JSON array
+    market_type: Mapped[str | None] = mapped_column(nullable=True)
+    description: Mapped[str | None] = mapped_column(nullable=True)
+    extra_info: Mapped[str | None] = mapped_column(nullable=True)  # JSON
 
 
 class MarketChange(Base):
@@ -130,9 +139,34 @@ def get_session() -> Generator[Session, None, None]:
         session.close()
 
 
+_ENRICHED_COLUMNS = [
+    ("volume", "REAL"),
+    ("liquidity", "REAL"),
+    ("start_date", "TIMESTAMP"),
+    ("category", "TEXT"),
+    ("tags", "TEXT"),
+    ("market_type", "TEXT"),
+    ("description", "TEXT"),
+    ("extra_info", "TEXT"),
+]
+
+
+def _migrate_add_enriched_columns(engine) -> None:
+    """Add enriched columns to markets table if they do not exist (SQLite migration)."""
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(markets)"))
+        existing = {row[1] for row in result}
+    for col_name, col_type in _ENRICHED_COLUMNS:
+        if col_name not in existing:
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE markets ADD COLUMN {col_name} {col_type}"))
+                conn.commit()
+
+
 def setup_db() -> Path:
     """
     Create the database file and tables if they do not exist.
+    Migrates existing tables to add new enriched columns if missing.
 
     Creates:
         - market_change: log of price/volume changes (INSERT only)
@@ -146,4 +180,6 @@ def setup_db() -> Path:
 
     engine = _get_engine()
     Base.metadata.create_all(engine)
+    if path.exists():
+        _migrate_add_enriched_columns(engine)
     return path

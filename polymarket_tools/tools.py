@@ -1,10 +1,11 @@
 """
 Query tools for the agent to retrieve market data from the SQLite database.
 
-Exposes get_all_markets, get_market_trends, get_category_markets,
+Exposes get_all_markets, get_market, get_market_trends, get_category_markets,
 get_closed_markets, get_open_markets, and query_market_field.
 """
 
+import json
 from datetime import datetime
 
 from sqlalchemy import select
@@ -12,6 +13,11 @@ from sqlalchemy import select
 from . import db
 from .db import Market, MarketChange
 
+# Enriched columns: excluded from list endpoints, included only in get_market
+EXTRA_FIELDS = frozenset({
+    "volume", "liquidity", "start_date", "category", "tags",
+    "market_type", "description", "extra_info",
+})
 
 # Valid field names for query_market_field (must match Market model columns)
 _MARKET_QUERYABLE_FIELDS = frozenset(
@@ -28,16 +34,27 @@ def _serialize_value(v) -> str | float | int | bool | None:
     return v
 
 
-def _model_to_dict(obj, exclude: set[str] | None = None) -> dict:
+def _model_to_dict(
+    obj,
+    exclude: set[str] | None = None,
+    parse_extra_info: bool = False,
+) -> dict:
     """Convert ORM model instance to dict for JSON serialization."""
     if obj is None:
         return {}
     exclude = exclude or set()
-    return {
-        c.key: _serialize_value(getattr(obj, c.key))
-        for c in obj.__table__.columns
-        if c.key not in exclude
-    }
+    result = {}
+    for c in obj.__table__.columns:
+        if c.key in exclude:
+            continue
+        v = getattr(obj, c.key)
+        if parse_extra_info and c.key == "extra_info" and v is not None:
+            try:
+                v = json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                pass
+        result[c.key] = _serialize_value(v)
+    return result
 
 
 def get_all_markets(limit: int = 50) -> list[dict]:
@@ -57,7 +74,32 @@ def get_all_markets(limit: int = 50) -> list[dict]:
             .limit(limit)
         )
         rows = session.scalars(stmt).all()
-    return [_model_to_dict(r) for r in rows]
+    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
+
+
+def get_market(market_id: str, include_extra: bool = True) -> dict | None:
+    """
+    Return full market by market_id including enriched fields.
+
+    Args:
+        market_id: Polymarket condition_id.
+        include_extra: If True (default), include volume, liquidity, description,
+            tags, extra_info, etc. These are only populated when the market
+            was scanned via scan --market.
+
+    Returns:
+        Market dict with all columns, or None if not found.
+    """
+    with db.get_session() as session:
+        stmt = select(Market).where(Market.market_id == market_id)
+        market = session.scalar(stmt)
+        if market is None:
+            return None
+        return _model_to_dict(
+            market,
+            exclude=None if include_extra else EXTRA_FIELDS,
+            parse_extra_info=include_extra,
+        )
 
 
 def get_market_trends(market_id: str, limit: int = 50) -> list[dict]:
@@ -104,7 +146,7 @@ def get_category_markets(category_name: str, limit: int = 50) -> list[dict]:
             .limit(limit)
         )
         rows = session.scalars(stmt).all()
-    return [_model_to_dict(r) for r in rows]
+    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
 
 
 def get_closed_markets(limit: int = 50) -> list[dict]:
@@ -130,7 +172,7 @@ def get_closed_markets(limit: int = 50) -> list[dict]:
             .limit(limit)
         )
         rows = session.scalars(stmt).all()
-    return [_model_to_dict(r) for r in rows]
+    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
 
 
 def get_open_markets(limit: int = 50) -> list[dict]:
@@ -154,7 +196,7 @@ def get_open_markets(limit: int = 50) -> list[dict]:
             .limit(limit)
         )
         rows = session.scalars(stmt).all()
-    return [_model_to_dict(r) for r in rows]
+    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
 
 
 def query_market_field(market_id: str, field_name: str) -> str | None:

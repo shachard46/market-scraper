@@ -87,6 +87,20 @@ python -m polymarket_tools get_open_markets [--limit N]
 
 ---
 
+### get_market
+
+Return full market details including enriched fields (volume, liquidity, description, tags, extra_info, etc.). These fields are only populated when the market was scanned via `scan --market`.
+
+```bash
+python -m polymarket_tools get_market <market_id>
+```
+
+- `market_id`: Polymarket condition_id (e.g., `0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b`).
+
+**When to use:** User asks for full details about a specific market, including volume, liquidity, description, resolution source, or other enriched metadata. List commands (get_all_markets, get_open_markets, etc.) do not return these fields.
+
+---
+
 ### query_market_field
 
 Return a single field value for a market (e.g., question, status, slug).
@@ -96,7 +110,7 @@ python -m polymarket_tools query_market_field <market_id> <field_name>
 ```
 
 - `market_id`: Polymarket condition_id.
-- `field_name`: One of `market_id`, `clob_token_ids`, `status`, `question`, `slug`, `yes_token_id`, `no_token_id`, `last_trade_price`, `minimum_tick_size`, `neg_risk`, `change_id`, `outcome`, `market_category`.
+- `field_name`: One of `market_id`, `clob_token_ids`, `status`, `question`, `slug`, `yes_token_id`, `no_token_id`, `last_trade_price`, `minimum_tick_size`, `neg_risk`, `change_id`, `outcome`, `market_category`, or enriched fields (`volume`, `liquidity`, `start_date`, `category`, `tags`, `market_type`, `description`, `extra_info`) when the market was scanned with `scan --market`.
 
 **When to use:** User needs one specific piece of information about a market (e.g., "what is the question for market X?" or "what is the status of market Y?").
 
@@ -126,16 +140,17 @@ python -m polymarket_tools query_market_field <market_id> <field_name>
 
 ### scan
 
-Run a single scan of Polymarket markets and persist to the database. **By default scans only active markets** (via Gamma API). Use `--all` to include closed/archived markets (via CLOB API).
+Run a single scan of Polymarket markets and persist to the database. **By default scans only active markets** (via Gamma API). Use `--all` to include closed/archived markets (via CLOB API). Use `--market` to scan a single market and populate enriched fields (volume, liquidity, description, tags, etc.).
 
 ```bash
-python -m polymarket_tools scan [--limit N] [--all]
+python -m polymarket_tools scan [--limit N] [--all] [--market ID_OR_SLUG]
 ```
 
 - `--limit`: Max markets to scan (default: all).
 - `--all`: Include closed/archived markets. If omitted, only active tradable markets are scanned.
+- `--market`: Scan a single market by condition_id or slug. Populates enriched columns (volume, liquidity, start_date, category, tags, market_type, description, extra_info). Mutually exclusive with bulk scan.
 
-**When to use:** Cron jobs, one-off syncs, or OpenClaw scheduled runs. Use `--all` only when you need historical/closed market data.
+**When to use:** Cron jobs, one-off syncs, or OpenClaw scheduled runs. Use `--market` to enrich specific markets with full Gamma API data. Use `--all` only when you need historical/closed market data.
 
 ### poll
 

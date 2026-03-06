@@ -10,6 +10,7 @@ the CLOB API returns primarily closed/historical markets.
 
 import json
 import sys
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -53,6 +54,76 @@ def _build_tokens(token_ids: list, outcomes: list[str], prices: list[str]) -> li
             "winner": False,
         })
     return tokens
+
+
+_KEYS_IN_EXPLICIT_COLUMNS = {
+    "conditionId", "condition_id", "question", "slug", "clobTokenIds", "clob_token_ids",
+    "outcomes", "outcomePrices", "active", "closed", "archived",
+    "negRisk", "neg_risk", "orderPriceMinTickSize", "orderMinSize",
+    "volume", "liquidity", "volumeNum", "liquidityNum",
+    "startDate", "startDateIso", "category", "tags", "marketType", "description",
+}
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    """Parse ISO datetime string to datetime, or return None."""
+    if not value:
+        return None
+    try:
+        s = value.replace("Z", "+00:00")
+        return datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_enriched_fields(gamma_market: dict[str, Any]) -> dict[str, Any]:
+    """
+    Extract enriched fields from Gamma API market for DB storage.
+
+    Returns dict with: volume, liquidity, start_date, category, tags,
+    market_type, description, extra_info (JSON string of remaining fields).
+    """
+    vol = gamma_market.get("volumeNum") or gamma_market.get("volume")
+    volume = float(vol) if vol is not None else None
+
+    liq = gamma_market.get("liquidityNum") or gamma_market.get("liquidity")
+    liquidity = float(liq) if liq is not None else None
+
+    start_date = _parse_iso_datetime(
+        gamma_market.get("startDate") or gamma_market.get("startDateIso")
+    )
+
+    category = gamma_market.get("category")
+    if category is not None:
+        category = str(category)
+
+    tags_raw = gamma_market.get("tags")
+    if tags_raw is not None:
+        tags = json.dumps(tags_raw) if not isinstance(tags_raw, str) else tags_raw
+    else:
+        tags = None
+
+    market_type = gamma_market.get("marketType")
+    if market_type is not None:
+        market_type = str(market_type)
+
+    description = gamma_market.get("description")
+    if description is not None:
+        description = str(description)
+
+    extra = {k: v for k, v in gamma_market.items() if k not in _KEYS_IN_EXPLICIT_COLUMNS}
+    extra_info = json.dumps(extra) if extra else None
+
+    return {
+        "volume": volume,
+        "liquidity": liquidity,
+        "start_date": start_date,
+        "category": category,
+        "tags": tags,
+        "market_type": market_type,
+        "description": description,
+        "extra_info": extra_info,
+    }
 
 
 def _gamma_to_clob_format(m: dict[str, Any]) -> dict[str, Any]:
@@ -109,6 +180,46 @@ def _fetch_gamma_markets() -> list[dict[str, Any]]:
             break
         offset += GAMMA_PAGE_LIMIT
     return all_markets
+
+
+def _is_slug(identifier: str) -> bool:
+    """Return True if identifier looks like a slug (no 0x, no long hex)."""
+    id_ = identifier.strip()
+    if id_.startswith("0x") and len(id_) > 10:
+        return False
+    return "-" in id_ or id_.replace("-", "").replace("_", "").isalnum()
+
+
+def fetch_market(identifier: str) -> dict[str, Any] | None:
+    """
+    Fetch a single market from Gamma API by condition_id or slug.
+
+    Args:
+        identifier: Either a slug (e.g. "bitboy-convicted") or condition_id (0x...).
+
+    Returns:
+        Raw Gamma API market object, or None if not found.
+    """
+    id_ = identifier.strip()
+    try:
+        if _is_slug(id_):
+            resp = requests.get(
+                f"{GAMMA_URL}/markets/slug/{id_}",
+                timeout=15,
+            )
+        else:
+            resp = requests.get(
+                f"{GAMMA_URL}/markets",
+                params={"condition_id": id_},
+                timeout=15,
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list):
+            return data[0] if data else None
+        return data
+    except (requests.RequestException, ValueError, KeyError, IndexError):
+        return None
 
 
 def fetch_markets(active_only: bool = True) -> list[dict[str, Any]]:
