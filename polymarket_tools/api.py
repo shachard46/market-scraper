@@ -19,6 +19,7 @@ BASE_URL = "https://clob.polymarket.com"
 GAMMA_URL = "https://gamma-api.polymarket.com"
 GAMMA_PAGE_LIMIT = 100
 GAMMA_FETCH_PROGRESS_INTERVAL = 500  # Print every N markets fetched
+BOOKS_BATCH_SIZE = 500  # Max token_ids per POST /books request
 DEFAULT_OUTCOMES = ["Yes", "No"]
 DEFAULT_PRICES = ["0.5", "0.5"]
 
@@ -282,6 +283,38 @@ def fetch_orderbook(token_id: str) -> dict[str, Any] | None:
         return None
 
 
+def fetch_orderbooks_batch(token_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """
+    Fetch orderbooks for multiple tokens in batch (POST /books).
+
+    Args:
+        token_ids: List of CLOB token IDs.
+
+    Returns:
+        Dict mapping token_id -> orderbook dict (bids, asks, last_trade_price, etc.).
+        Missing or failed tokens are omitted.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for i in range(0, len(token_ids), BOOKS_BATCH_SIZE):
+        chunk = token_ids[i : i + BOOKS_BATCH_SIZE]
+        body = [{"token_id": tid} for tid in chunk]
+        try:
+            resp = requests.post(
+                f"{BASE_URL}/books",
+                json=body,
+                timeout=60,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except (requests.RequestException, ValueError):
+            continue
+        for item in data if isinstance(data, list) else []:
+            tid = item.get("asset_id") or item.get("token_id")
+            if tid:
+                result[str(tid)] = item
+    return result
+
+
 def fetch_last_trade_price(token_id: str) -> float | None:
     """
     Fetch the last trade price for a token (best available price to buy).
@@ -305,6 +338,19 @@ def fetch_last_trade_price(token_id: str) -> float | None:
             return float(price)
         return None
     except (requests.RequestException, ValueError, TypeError):
+        return None
+
+
+def last_trade_price_from_book(book: dict[str, Any] | None) -> float | None:
+    """Extract last_trade_price from orderbook (batch response includes it)."""
+    if not book:
+        return None
+    p = book.get("last_trade_price")
+    if p is None:
+        return None
+    try:
+        return float(p)
+    except (TypeError, ValueError):
         return None
 
 

@@ -59,13 +59,19 @@ def _get_market_category(m: dict[str, Any]) -> str:
     return "uncategorized"
 
 
-def _get_last_trade_price(m: dict[str, Any], yes_token_id: str | None) -> float | None:
-    """Prefer API last trade; fallback to tokens[].price."""
-    if yes_token_id:
-        price = api.fetch_last_trade_price(yes_token_id)
-        if price is not None:
-            return price
+def _get_token_price_from_market(m: dict[str, Any], yes_token_id: str | None) -> float | None:
+    """Get price from tokens[].price (Gamma outcomePrices). Prefer yes token."""
     tokens = m.get("tokens") or []
+    if yes_token_id:
+        for t in tokens:
+            if str(t.get("token_id", "")) == str(yes_token_id):
+                p = t.get("price")
+                if p is not None:
+                    try:
+                        return float(p)
+                    except (TypeError, ValueError):
+                        pass
+                break
     for t in tokens:
         p = t.get("price")
         if p is not None:
@@ -76,8 +82,36 @@ def _get_last_trade_price(m: dict[str, Any], yes_token_id: str | None) -> float 
     return None
 
 
+def _get_last_trade_price(
+    m: dict[str, Any],
+    yes_token_id: str | None,
+    yes_book: dict[str, Any] | None = None,
+    use_api: bool = True,
+) -> float | None:
+    """
+    Get last trade price from multiple sources in priority order.
+
+    1. orderbook.last_trade_price (from batch response)
+    2. tokens[].price (Gamma outcomePrices)
+    3. API fetch (only when use_api=True, e.g. scan_single_market)
+    """
+    if yes_book:
+        p = api.last_trade_price_from_book(yes_book)
+        if p is not None:
+            return p
+    p = _get_token_price_from_market(m, yes_token_id)
+    if p is not None:
+        return p
+    if use_api and yes_token_id:
+        return api.fetch_last_trade_price(yes_token_id)
+    return None
+
+
 def _persist_market(
-    session, m: dict[str, Any], enriched: dict[str, Any] | None
+    session,
+    m: dict[str, Any],
+    enriched: dict[str, Any] | None,
+    orderbooks: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
     """
     Persist a single market to DB: insert MarketChange, upsert Market.
@@ -87,6 +121,7 @@ def _persist_market(
         m: Market in CLOB-like format (condition_id, tokens, question, etc.).
         enriched: Optional dict with volume, liquidity, start_date, category,
             tags, market_type, description, extra_info. If None, enriched cols stay NULL.
+        orderbooks: Optional pre-fetched map token_id -> orderbook. If None, fetch per token.
 
     Returns:
         True if persisted, False if skipped (missing condition_id or tokens).
@@ -99,8 +134,12 @@ def _persist_market(
     if not yes_token_id or not no_token_id:
         return False
 
-    yes_book = api.fetch_orderbook(yes_token_id)
-    no_book = api.fetch_orderbook(no_token_id)
+    if orderbooks is not None:
+        yes_book = orderbooks.get(yes_token_id)
+        no_book = orderbooks.get(no_token_id)
+    else:
+        yes_book = api.fetch_orderbook(yes_token_id)
+        no_book = api.fetch_orderbook(no_token_id)
     best_bid_yes, best_ask_yes = api.compute_bbo_from_orderbook(yes_book)
     best_bid_no, best_ask_no = api.compute_bbo_from_orderbook(no_book)
 
@@ -110,11 +149,16 @@ def _persist_market(
 
     yes_price = mid
     no_price = (1.0 - mid) if mid is not None else None
+    use_api_for_price = orderbooks is None
     if yes_price is None:
-        last = _get_last_trade_price(m, yes_token_id)
+        last = _get_last_trade_price(m, yes_token_id, yes_book=yes_book, use_api=use_api_for_price)
         yes_price = last if last is not None else 0.0
     if no_price is None:
         no_price = 1.0 - yes_price if yes_price is not None else 0.0
+
+    last_trade_price = _get_last_trade_price(
+        m, yes_token_id, yes_book=yes_book, use_api=use_api_for_price
+    )
 
     change = MarketChange(
         market_id=condition_id,
@@ -143,7 +187,6 @@ def _persist_market(
     neg_risk = bool(m.get("neg_risk"))
     outcome = _get_outcome(m)
     market_category = _get_market_category(m)
-    last_trade_price = _get_last_trade_price(m, yes_token_id)
 
     values: dict[str, Any] = {
         "market_id": condition_id,
