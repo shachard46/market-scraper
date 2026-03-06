@@ -13,7 +13,7 @@ from sqlalchemy.dialects.sqlite import insert
 
 PROGRESS_INTERVAL = 50
 
-from . import api, db
+from . import api, db, tools
 from .db import Market, MarketChange
 
 
@@ -306,6 +306,71 @@ def scan_once(
                 if processed % PROGRESS_INTERVAL == 0:
                     print(f"  Processed {processed}/{total} markets.", file=sys.stderr)
 
+    return processed
+
+
+def refresh_sample_open_markets(limit: int = 200) -> int:
+    """
+    Refresh a sample of open markets from DB (oldest-refreshed first) using batch orderbooks.
+
+    Queries get_stale_open_markets(limit), builds CLOB-like dicts from DB rows,
+    fetches orderbooks via single batch request, persists each market.
+    No Gamma API calls; uses last_trade_price from DB for 0.5 fallback.
+
+    Args:
+        limit: Max markets to refresh. Default 200.
+
+    Returns:
+        Number of markets refreshed.
+    """
+    rows = tools.get_stale_open_markets(limit=limit)
+    if not rows:
+        return 0
+
+    print(f"Refreshing {len(rows)} stale open markets...", file=sys.stderr)
+    markets: list[dict[str, Any]] = []
+    for r in rows:
+        yes_price = r.get("last_trade_price")
+        if yes_price is None:
+            yes_price = 0.5
+        else:
+            try:
+                yes_price = float(yes_price)
+            except (TypeError, ValueError):
+                yes_price = 0.5
+        no_price = 1.0 - yes_price
+        markets.append({
+            "condition_id": r["market_id"],
+            "question": r.get("question") or "",
+            "market_slug": r.get("slug") or "",
+            "tokens": [
+                {"token_id": r["yes_token_id"], "outcome": "Yes", "price": yes_price, "winner": False},
+                {"token_id": r["no_token_id"], "outcome": "No", "price": no_price, "winner": False},
+            ],
+            "minimum_tick_size": r.get("minimum_tick_size"),
+            "neg_risk": bool(r.get("neg_risk", False)),
+            "tags": [r.get("market_category") or "uncategorized"],
+        })
+
+    token_ids: list[str] = []
+    for m in markets:
+        yes_id = m["tokens"][0]["token_id"]
+        no_id = m["tokens"][1]["token_id"]
+        if yes_id:
+            token_ids.append(yes_id)
+        if no_id and no_id != yes_id:
+            token_ids.append(no_id)
+    token_ids = list(dict.fromkeys(token_ids))
+    print(f"  Fetching orderbooks for {len(token_ids)} tokens (batch)...", file=sys.stderr)
+    orderbooks = api.fetch_orderbooks_batch(token_ids)
+
+    processed = 0
+    with db.get_session() as session:
+        for m in markets:
+            if _persist_market(session, m, enriched=None, orderbooks=orderbooks):
+                processed += 1
+                if processed % PROGRESS_INTERVAL == 0:
+                    print(f"  Refreshed {processed}/{len(markets)} markets.", file=sys.stderr)
     return processed
 
 
