@@ -47,8 +47,9 @@ def _cmd_scan(args: argparse.Namespace) -> int:
             return 1
     limit = getattr(args, "limit", None)
     active_only = getattr(args, "active_only", True)
+    batch_only = getattr(args, "batch_only", False)
     try:
-        n = scanner.scan_once(limit=limit, active_only=active_only)
+        n = scanner.scan_once(limit=limit, active_only=active_only, batch_only=batch_only)
         print(f"Scanned {n} markets", file=sys.stderr)
         return 0
     except Exception as e:
@@ -79,6 +80,7 @@ def _cmd_poll(args: argparse.Namespace) -> NoReturn:
                 n = scanner.scan_once(
                     limit=getattr(args, "scan_limit", None),
                     active_only=getattr(args, "active_only", True),
+                    batch_only=getattr(args, "batch_only", False),
                 )
                 print(f"[poll] Scanned {n} markets", file=sys.stderr)
             except Exception as e:
@@ -176,6 +178,7 @@ def main() -> int:
     scan_p.add_argument("--limit", type=int, default=None, help="Max markets to scan (default: all)")
     scan_p.add_argument("--all", action="store_false", dest="active_only", help="Include closed/archived markets")
     scan_p.add_argument("--market", type=str, default=None, help="Scan single market by condition_id or slug")
+    scan_p.add_argument("--batch-only", action="store_true", dest="batch_only", help="Use only batch API calls (no per-market orderbook fetches)")
     scan_p.set_defaults(handler=_cmd_scan)
 
     sync_closed_p = sub.add_parser("sync_closed_markets")
@@ -186,6 +189,7 @@ def main() -> int:
     poll_p.add_argument("--interval", type=int, default=5, help="Poll interval in minutes")
     poll_p.add_argument("--limit", type=int, default=None, dest="scan_limit", help="Max markets per scan (default: all)")
     poll_p.add_argument("--all", action="store_false", dest="active_only", help="Include closed/archived markets")
+    poll_p.add_argument("--batch-only", action="store_true", dest="batch_only", help="Use only batch API calls (no per-market orderbook fetches)")
     poll_p.set_defaults(handler=_cmd_poll)
 
     m_p = sub.add_parser("get_all_markets")

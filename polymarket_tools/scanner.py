@@ -249,12 +249,16 @@ def scan_single_market(identifier: str) -> bool:
         return _persist_market(session, m, enriched)
 
 
-def scan_once(limit: int | None = None, active_only: bool = True) -> int:
+def scan_once(
+    limit: int | None = None,
+    active_only: bool = True,
+    batch_only: bool = False,
+) -> int:
     """
     Perform a single scan: fetch markets, compute BBO, persist to DB.
 
     For each market:
-        1. Fetch orderbooks for yes/no tokens.
+        1. Fetch orderbooks for yes/no tokens (batch or per-market).
         2. Compute midpoint and spread from BBO.
         3. INSERT row into market_change (returns change_id).
         4. UPSERT row into markets using SQLite INSERT ... ON CONFLICT DO UPDATE.
@@ -262,6 +266,9 @@ def scan_once(limit: int | None = None, active_only: bool = True) -> int:
     Args:
         limit: Optional max number of markets to process (for testing).
         active_only: If True (default), fetch only active markets. If False, fetch all.
+        batch_only: If True, use only batch API calls (POST /books) - no per-market
+            fetch_orderbook or fetch_last_trade_price. Faster but may miss orderbooks
+            for tokens that fail in the batch.
 
     Returns:
         Number of markets processed successfully.
@@ -271,11 +278,24 @@ def scan_once(limit: int | None = None, active_only: bool = True) -> int:
         markets = markets[:limit]
     total = len(markets)
     print(f"Scanning {total} markets...", file=sys.stderr)
-    processed = 0
 
+    orderbooks: dict[str, dict[str, Any]] | None = None
+    if batch_only:
+        token_ids: list[str] = []
+        for m in markets:
+            yes_id, no_id = _get_token_ids(m)
+            if yes_id:
+                token_ids.append(yes_id)
+            if no_id and no_id != yes_id:
+                token_ids.append(no_id)
+        token_ids = list(dict.fromkeys(token_ids))  # preserve order, dedupe
+        print(f"  Fetching orderbooks for {len(token_ids)} tokens (batch)...", file=sys.stderr)
+        orderbooks = api.fetch_orderbooks_batch(token_ids)
+
+    processed = 0
     with db.get_session() as session:
         for m in markets:
-            if _persist_market(session, m, enriched=None):
+            if _persist_market(session, m, enriched=None, orderbooks=orderbooks):
                 processed += 1
                 if processed % PROGRESS_INTERVAL == 0:
                     print(f"  Processed {processed}/{total} markets.", file=sys.stderr)

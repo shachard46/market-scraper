@@ -143,11 +143,12 @@ python -m polymarket_tools query_market_field <market_id> <field_name>
 Run a single scan of Polymarket markets and persist to the database. **By default scans only active markets** (via Gamma API). Use `--all` to include closed/archived markets (via CLOB API). Use `--market` to scan a single market and populate enriched fields (volume, liquidity, description, tags, etc.).
 
 ```bash
-python -m polymarket_tools scan [--limit N] [--all] [--market ID_OR_SLUG]
+python -m polymarket_tools scan [--limit N] [--all] [--batch-only] [--market ID_OR_SLUG]
 ```
 
 - `--limit`: Max markets to scan (default: all).
 - `--all`: Include closed/archived markets. If omitted, only active tradable markets are scanned.
+- `--batch-only`: Use only batch API calls (POST /books) — no per-market orderbook or last-trade-price fetches. Faster and fewer API calls; tokens missing from the batch response will have no BBO/spread.
 - `--market`: Scan a single market by condition_id or slug. Populates enriched columns (volume, liquidity, start_date, category, tags, market_type, description, extra_info). Mutually exclusive with bulk scan.
 
 **When to use:** Cron jobs, one-off syncs, or OpenClaw scheduled runs. Use `--market` to enrich specific markets with full Gamma API data. Use `--all` only when you need historical/closed market data.
@@ -175,6 +176,7 @@ python -m polymarket_tools poll [--interval M] [--limit N] [--all]
 - `--interval`: Poll interval in minutes (default: 5).
 - `--limit`: Max markets per scan (default: all).
 - `--all`: Include closed/archived markets per scan.
+- `--batch-only`: Use only batch API calls per scan (no per-market orderbook fetches).
 
 **When to use:** Long-lived background process for continuous updates.
 
