@@ -1,9 +1,0 @@
-Metadata-Version: 2.1
-Name: polymarket-tools
-Version: 0.1.0
-Summary: Polymarket CLOB scanner and query tools for OpenClaw
-Requires-Python: >=3.11
-Description-Content-Type: text/markdown
-Requires-Dist: requests>=2.28
-Provides-Extra: openclaw
-Requires-Dist: openclaw-sdk; extra == "openclaw"

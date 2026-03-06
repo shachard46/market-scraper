@@ -5,6 +5,7 @@ Commands:
     setup                Initialize the SQLite database
     scan                 Run a single scan (for cron/scheduled runs)
     sync_closed_markets  Sync markets that have closed since last scan
+    sample_refresh       Periodically refresh stale open markets (gentle API usage)
     poll                 Run background polling loop
     get_all_markets      List all markets
     get_market_trends    Get price/volume history for a market
@@ -67,6 +68,24 @@ def _cmd_sync_closed_markets(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"Sync failed: {e}", file=sys.stderr)
         return 1
+
+
+def _cmd_sample_refresh(args: argparse.Namespace) -> NoReturn:
+    """Periodically refresh stale open markets from DB."""
+    limit = getattr(args, "limit", 200)
+    interval = getattr(args, "interval", 60)  # seconds
+    print(f"Starting sample_refresh loop (limit={limit}, interval={interval}s)", file=sys.stderr)
+
+    async def loop() -> None:
+        while True:
+            try:
+                n = scanner.refresh_sample_open_markets(limit=limit)
+                print(f"[sample_refresh] Refreshed {n} markets", file=sys.stderr)
+            except Exception as e:
+                print(f"[sample_refresh] Error: {e}", file=sys.stderr)
+            await asyncio.sleep(interval)
+
+    asyncio.run(loop())
 
 
 def _cmd_poll(args: argparse.Namespace) -> NoReturn:
@@ -185,6 +204,11 @@ def main() -> int:
     sync_closed_p.add_argument("--limit", type=int, default=500, help="Max closed markets to fetch from API (default: 500)")
     sync_closed_p.set_defaults(handler=_cmd_sync_closed_markets)
 
+    sample_refresh_p = sub.add_parser("sample_refresh")
+    sample_refresh_p.add_argument("--limit", type=int, default=200, help="Markets to refresh per cycle (default: 200)")
+    sample_refresh_p.add_argument("--interval", type=int, default=60, help="Seconds between cycles (default: 60)")
+    sample_refresh_p.set_defaults(handler=_cmd_sample_refresh)
+
     poll_p = sub.add_parser("poll")
     poll_p.add_argument("--interval", type=int, default=5, help="Poll interval in minutes")
     poll_p.add_argument("--limit", type=int, default=None, dest="scan_limit", help="Max markets per scan (default: all)")
@@ -225,8 +249,8 @@ def main() -> int:
 
     args = parser.parse_args()
     handler = args.handler
-    if handler is _cmd_poll:
-        _cmd_poll(args)
+    if handler in (_cmd_poll, _cmd_sample_refresh):
+        handler(args)
         return 0  # unreachable
     return handler(args)
 

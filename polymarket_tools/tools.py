@@ -199,6 +199,31 @@ def get_open_markets(limit: int = 50) -> list[dict]:
     return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
 
 
+def get_stale_open_markets(limit: int = 200) -> list[dict]:
+    """
+    Return open markets ordered by staleness (least recently updated first).
+
+    For sample_refresh: picks markets with lowest change_id (updated longest ago)
+    so each gets a turn before any gets a second refresh.
+
+    Args:
+        limit: Maximum number of markets to return. Default 200.
+
+    Returns:
+        List of market dicts for open/active markets, oldest-refreshed first.
+    """
+    with db.get_session() as session:
+        stmt = (
+            select(Market)
+            .where(Market.outcome.is_(None))
+            .where(Market.status == "active")
+            .order_by(Market.change_id.asc())
+            .limit(limit)
+        )
+        rows = session.scalars(stmt).all()
+    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
+
+
 def query_market_field(market_id: str, field_name: str) -> str | None:
     """
     Return a single field value for a market by market_id.

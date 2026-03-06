@@ -135,6 +135,7 @@ python -m polymarket_tools query_market_field <market_id> <field_name>
 
 3. **Start the background scanner** (choose one):
    - Long-lived process: `python -m polymarket_tools poll --interval 5` (polls every 5 minutes).
+   - Gentle refresh: `python -m polymarket_tools sample_refresh` (200 markets/min, batch orderbooks only).
    - Cron: `*/5 * * * * cd /path/to/market-scarper && python -m polymarket_tools scan && python -m polymarket_tools sync_closed_markets`
    - OpenClaw schedule: use `ScheduleConfig` to run `python -m polymarket_tools scan` and `python -m polymarket_tools sync_closed_markets` periodically.
 
@@ -165,7 +166,18 @@ python -m polymarket_tools sync_closed_markets [--limit N]
 
 **When to use:** Run after `scan` (or in the same cron/poll cycle) to keep the local DB in sync when markets close between scans. Ensures `get_closed_markets` and `get_open_markets` reflect accurate status.
 
-### poll
+### sample_refresh
+
+Periodically refresh a sample of open markets from the DB, ordered by staleness (oldest-refreshed first). Uses batch orderbooks only — one POST /books per cycle — to avoid spamming the Polymarket API when a full 35k-market scan is too heavy. Run an initial `scan --batch-only` first to populate the DB.
+
+```bash
+python -m polymarket_tools sample_refresh [--limit N] [--interval S]
+```
+
+- `--limit`: Markets to refresh per cycle (default: 200). Picks oldest-refreshed first (change_id ASC).
+- `--interval`: Seconds between cycles (default: 60).
+
+**When to use:** Long-lived process to gradually fill the DB with up-to-date prices without overwhelming the API. Each cycle refreshes the 200 stalest open markets; over ~175 cycles (~3 hours at 60s) all 35k markets are touched once.
 
 Run a background loop that periodically scans markets.
 
