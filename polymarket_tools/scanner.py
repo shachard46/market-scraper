@@ -153,6 +153,12 @@ def _persist_market(
     if yes_price is None:
         last = _get_last_trade_price(m, yes_token_id, yes_book=yes_book, use_api=use_api_for_price)
         yes_price = last if last is not None else 0.0
+    # Batch mode: BBO midpoint often spuriously 0.5; prefer Gamma outcomePrices when they disagree
+    if orderbooks is not None and yes_price == 0.5:
+        gamma_price = _get_token_price_from_market(m, yes_token_id)
+        if gamma_price is not None and abs(gamma_price - 0.5) > 0.05:
+            yes_price = gamma_price
+            no_price = 1.0 - yes_price
     if no_price is None:
         no_price = 1.0 - yes_price if yes_price is not None else 0.0
 
