@@ -135,8 +135,8 @@ python -m polymarket_tools query_market_field <market_id> <field_name>
 
 3. **Start the background scanner** (choose one):
    - Long-lived process: `python -m polymarket_tools poll --interval 5` (polls every 5 minutes).
-   - Cron: `*/5 * * * * cd /path/to/market-scarper && python -m polymarket_tools scan`
-   - OpenClaw schedule: use `ScheduleConfig` to run `python -m polymarket_tools scan` periodically.
+   - Cron: `*/5 * * * * cd /path/to/market-scarper && python -m polymarket_tools scan && python -m polymarket_tools sync_closed_markets`
+   - OpenClaw schedule: use `ScheduleConfig` to run `python -m polymarket_tools scan` and `python -m polymarket_tools sync_closed_markets` periodically.
 
 ### scan
 
@@ -151,6 +151,18 @@ python -m polymarket_tools scan [--limit N] [--all] [--market ID_OR_SLUG]
 - `--market`: Scan a single market by condition_id or slug. Populates enriched columns (volume, liquidity, start_date, category, tags, market_type, description, extra_info). Mutually exclusive with bulk scan.
 
 **When to use:** Cron jobs, one-off syncs, or OpenClaw scheduled runs. Use `--market` to enrich specific markets with full Gamma API data. Use `--all` only when you need historical/closed market data.
+
+### sync_closed_markets
+
+Sync markets that have closed since the last scan. Queries the Gamma API for recently closed markets (closed=true, active=false) with pagination, then updates any DB records that are still marked `active` to `closed` and sets the resolved outcome.
+
+```bash
+python -m polymarket_tools sync_closed_markets [--limit N]
+```
+
+- `--limit`: Max closed markets to fetch from API (default: 500). Uses pagination to retrieve the most recent closed markets.
+
+**When to use:** Run after `scan` (or in the same cron/poll cycle) to keep the local DB in sync when markets close between scans. Ensures `get_closed_markets` and `get_open_markets` reflect accurate status.
 
 ### poll
 

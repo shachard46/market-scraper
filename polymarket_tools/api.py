@@ -37,14 +37,19 @@ def _parse_json_field(value: str | list | None, default: list[str]) -> list:
 
 
 def _build_tokens(token_ids: list, outcomes: list[str], prices: list[str]) -> list[dict[str, Any]]:
-    """Build token list for yes/no outcomes from parallel lists."""
+    """Build token list for yes/no outcomes from parallel lists.
+
+    For resolved/closed markets, outcomePrices are typically ["1","0"] or ["0","1"];
+    the outcome with price 1.0 is marked as winner.
+    """
     tokens = []
     for tid, outcome, price in zip(token_ids[:2], outcomes[:2], prices[:2]):
+        p = float(price) if price is not None else 0.5
         tokens.append({
             "token_id": str(tid) if tid else None,
             "outcome": str(outcome),
-            "price": float(price) if price is not None else 0.5,
-            "winner": False,
+            "price": p,
+            "winner": p >= 0.99,  # Resolved: winning outcome has price ~1.0
         })
     while len(tokens) < 2 and len(token_ids) > len(tokens):
         idx = len(tokens)
@@ -181,6 +186,71 @@ def _fetch_gamma_markets() -> list[dict[str, Any]]:
             break
         offset += GAMMA_PAGE_LIMIT
     return all_markets
+
+
+def fetch_closed_gamma_markets(limit: int = 500) -> list[dict[str, Any]]:
+    """
+    Fetch recently closed markets from Gamma API.
+
+    Uses closed=true and active=false with pagination to retrieve the most
+    recently closed markets. If the API supports ordering by closed_time,
+    results are ordered descending; otherwise returns whatever order the API
+    provides.
+
+    Args:
+        limit: Max total markets to fetch (default 500). Uses pagination
+            internally with GAMMA_PAGE_LIMIT per request.
+
+    Returns:
+        List of raw Gamma API market objects.
+    """
+    print("Fetching closed markets...", file=sys.stderr)
+    all_markets: list[dict[str, Any]] = []
+    offset = 0
+    params: dict[str, str | int] = {
+        "closed": "true",
+        "active": "false",
+        "limit": GAMMA_PAGE_LIMIT,
+        "offset": 0,
+    }
+    # Try ordering by closed_time descending (most recent first)
+    # If API returns 422, we retry without order
+    use_order = True
+
+    while len(all_markets) < limit:
+        params["offset"] = offset
+        if use_order:
+            params["order"] = "closed_time"
+            params["ascending"] = "false"
+        try:
+            resp = requests.get(
+                f"{GAMMA_URL}/markets",
+                params=params,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.RequestException as e:
+            if use_order and hasattr(e, "response") and getattr(e.response, "status_code", None) == 422:
+                use_order = False
+                params.pop("order", None)
+                params.pop("ascending", None)
+                continue
+            raise
+        markets = data if isinstance(data, list) else data.get("data", [])
+        if not markets:
+            break
+        all_markets.extend(markets)
+        n = len(all_markets)
+        if n % GAMMA_FETCH_PROGRESS_INTERVAL == 0 or len(markets) < GAMMA_PAGE_LIMIT:
+            print(f"  Fetched {n} closed markets...", file=sys.stderr)
+        if len(markets) < GAMMA_PAGE_LIMIT or n >= limit:
+            break
+        offset += GAMMA_PAGE_LIMIT
+        if offset >= limit:
+            break
+
+    return all_markets[:limit]
 
 
 def _is_slug(identifier: str) -> bool:

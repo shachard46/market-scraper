@@ -4,6 +4,7 @@ CLI entry point for Polymarket tools.
 Commands:
     setup                Initialize the SQLite database
     scan                 Run a single scan (for cron/scheduled runs)
+    sync_closed_markets  Sync markets that have closed since last scan
     poll                 Run background polling loop
     get_all_markets      List all markets
     get_market_trends    Get price/volume history for a market
@@ -52,6 +53,18 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         return 0
     except Exception as e:
         print(f"Scan failed: {e}", file=sys.stderr)
+        return 1
+
+
+def _cmd_sync_closed_markets(args: argparse.Namespace) -> int:
+    """Sync markets that have closed since the last scan."""
+    limit = getattr(args, "limit", 500)
+    try:
+        n = scanner.sync_closed_markets(limit=limit)
+        print(f"Synced {n} closed markets", file=sys.stderr)
+        return 0
+    except Exception as e:
+        print(f"Sync failed: {e}", file=sys.stderr)
         return 1
 
 
@@ -164,6 +177,10 @@ def main() -> int:
     scan_p.add_argument("--all", action="store_false", dest="active_only", help="Include closed/archived markets")
     scan_p.add_argument("--market", type=str, default=None, help="Scan single market by condition_id or slug")
     scan_p.set_defaults(handler=_cmd_scan)
+
+    sync_closed_p = sub.add_parser("sync_closed_markets")
+    sync_closed_p.add_argument("--limit", type=int, default=500, help="Max closed markets to fetch from API (default: 500)")
+    sync_closed_p.set_defaults(handler=_cmd_sync_closed_markets)
 
     poll_p = sub.add_parser("poll")
     poll_p.add_argument("--interval", type=int, default=5, help="Poll interval in minutes")

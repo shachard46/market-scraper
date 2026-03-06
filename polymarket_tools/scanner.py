@@ -281,3 +281,44 @@ def scan_once(limit: int | None = None, active_only: bool = True) -> int:
                     print(f"  Processed {processed}/{total} markets.", file=sys.stderr)
 
     return processed
+
+
+def sync_closed_markets(limit: int = 500) -> int:
+    """
+    Sync markets that have closed since the last scan.
+
+    Fetches recently closed markets from the Gamma API (closed=true, active=false),
+    then for each market that exists in our DB with status 'active', updates the
+    record to status='closed' and sets the outcome from the API response.
+
+    Args:
+        limit: Max closed markets to fetch from API (default 500). Uses pagination.
+
+    Returns:
+        Number of DB records updated from active to closed.
+    """
+    gamma_markets = api.fetch_closed_gamma_markets(limit=limit)
+    updated = 0
+
+    with db.get_session() as session:
+        for gamma_m in gamma_markets:
+            condition_id = gamma_m.get("conditionId") or gamma_m.get("condition_id")
+            if not condition_id:
+                continue
+
+            market = session.get(db.Market, condition_id)
+            if market is None or market.status != "active":
+                continue
+
+            m = api._gamma_to_clob_format(gamma_m)
+            outcome = _get_outcome(m)
+
+            market.status = "closed"
+            market.outcome = outcome
+            updated += 1
+            if updated % PROGRESS_INTERVAL == 0:
+                print(f"  Synced {updated} closed markets.", file=sys.stderr)
+
+    if updated > 0:
+        print(f"Synced {updated} markets from active to closed.", file=sys.stderr)
+    return updated
