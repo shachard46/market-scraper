@@ -168,16 +168,16 @@ python -m polymarket_tools sync_closed_markets [--limit N]
 
 ### sample_refresh
 
-Periodically refresh a sample of open markets from the DB, ordered by staleness (oldest-refreshed first). Uses batch orderbooks only — one POST /books per cycle — to avoid spamming the Polymarket API when a full 35k-market scan is too heavy. Run an initial `scan --batch-only` first to populate the DB.
+Periodically refresh a sample of open markets from the DB, ordered by staleness (oldest-refreshed first). Each cycle uses one batch orderbook fetch (`POST /books`) plus per-market Gamma fetches to populate enriched columns (`volume`, `liquidity`, `description`, `tags`, `extra_info`, etc.). Run an initial `scan --batch-only` first to populate the DB.
 
 ```bash
 python -m polymarket_tools sample_refresh [--limit N] [--interval S]
 ```
 
-- `--limit`: Markets to refresh per cycle (default: 200). Picks oldest-refreshed first (change_id ASC).
+- `--limit`: Markets to refresh per cycle (default: 200). Picks oldest-refreshed first (change_id ASC). Higher values increase per-cycle Gamma API load.
 - `--interval`: Seconds between cycles (default: 60).
 
-**When to use:** Long-lived process to gradually fill the DB with up-to-date prices without overwhelming the API. Each cycle refreshes the 200 stalest open markets; over ~175 cycles (~3 hours at 60s) all 35k markets are touched once.
+**When to use:** Long-lived process to gradually fill the DB with up-to-date prices and enriched metadata without a full bulk rescan. Tune `--limit`/`--interval` conservatively (for example, `--limit 100 --interval 60`) when API budget is tight. Each cycle refreshes the stalest open markets; over repeated cycles all open markets are revisited.
 
 Run a background loop that periodically scans markets.
 

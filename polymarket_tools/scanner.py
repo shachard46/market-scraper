@@ -314,8 +314,8 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
     Refresh a sample of open markets from DB (oldest-refreshed first) using batch orderbooks.
 
     Queries get_stale_open_markets(limit), builds CLOB-like dicts from DB rows,
-    fetches orderbooks via single batch request, persists each market.
-    No Gamma API calls; uses last_trade_price from DB for 0.5 fallback.
+    fetches orderbooks via single batch request, then fetches per-market Gamma
+    details to populate enriched columns when possible.
 
     Args:
         limit: Max markets to refresh. Default 200.
@@ -367,7 +367,27 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
     processed = 0
     with db.get_session() as session:
         for m in markets:
-            if _persist_market(session, m, enriched=None, orderbooks=orderbooks):
+            condition_id = m.get("condition_id")
+            enriched: dict[str, Any] | None = None
+            if condition_id:
+                try:
+                    gamma_market = api.fetch_market(condition_id)
+                    if gamma_market:
+                        enriched = api._extract_enriched_fields(gamma_market)
+                    else:
+                        print(
+                            f"  [sample_refresh] No Gamma data for {condition_id}; "
+                            "persisting without enriched fields.",
+                            file=sys.stderr,
+                        )
+                except Exception as e:
+                    print(
+                        f"  [sample_refresh] Enriched fetch failed for {condition_id}: {e}; "
+                        "persisting without enriched fields.",
+                        file=sys.stderr,
+                    )
+
+            if _persist_market(session, m, enriched=enriched, orderbooks=orderbooks):
                 processed += 1
                 if processed % PROGRESS_INTERVAL == 0:
                     print(f"  Refreshed {processed}/{len(markets)} markets.", file=sys.stderr)
