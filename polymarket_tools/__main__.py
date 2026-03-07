@@ -14,6 +14,7 @@ Commands:
     get_open_markets     List open/active markets
     get_market          Get full market details (including enriched fields)
     query_market_field  Get a single field value for a market
+    search_markets      Search markets by keyword (question and description)
 """
 
 import argparse
@@ -187,6 +188,18 @@ def _cmd_query_market_field(args: argparse.Namespace) -> int:
         return 1
 
 
+def _cmd_search_markets(args: argparse.Namespace) -> int:
+    """Search markets by keyword (question and description)."""
+    keywords = getattr(args, "keywords", None)
+    if not keywords:
+        print("Error: at least one keyword required", file=sys.stderr)
+        return 1
+    limit = getattr(args, "limit", 50)
+    data = tools.search_markets(keywords=keywords, limit=limit)
+    print(json.dumps(data, indent=2))
+    return 0
+
+
 def main() -> int:
     """Parse args and dispatch to command handler."""
     parser = argparse.ArgumentParser(prog="polymarket_tools", description="Polymarket CLOB scanner and query tools")
@@ -246,6 +259,11 @@ def main() -> int:
     qf_p.add_argument("market_id", help="Polymarket condition_id")
     qf_p.add_argument("field_name", help="Market field (e.g., question, status, slug)")
     qf_p.set_defaults(handler=_cmd_query_market_field)
+
+    s_p = sub.add_parser("search_markets")
+    s_p.add_argument("keywords", nargs="+", help="Search terms (e.g., oil, oil price)")
+    s_p.add_argument("--limit", type=int, default=50, help="Max markets to return (default: 50)")
+    s_p.set_defaults(handler=_cmd_search_markets)
 
     args = parser.parse_args()
     handler = args.handler

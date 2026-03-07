@@ -1,6 +1,6 @@
 ---
 name: polymarket-scraper
-description: Maintains a local SQLite replica of Polymarket state using SQLAlchemy. Use when the user asks about Polymarket markets, prices, trends, closed/open markets, or prediction market data. The agent queries the local database—data is kept up to date by a background scanner.
+description: Maintains a local SQLite replica of Polymarket state using SQLAlchemy. Use when the user asks about Polymarket markets, prices, trends, closed/open markets, keyword search, or prediction market data. The agent queries the local database—data is kept up to date by a background scanner.
 ---
 
 # Polymarket Scraper Skill
@@ -15,9 +15,11 @@ The background polling loop runs automatically (e.g., via cron, systemd, or Open
 
 Invoke these via the shell (e.g., `python -m polymarket_tools <command> [args]`). Run from the project root (`market-scarper/`) or ensure `polymarket_tools` is on `PYTHONPATH`.
 
+**Response format:** All market list commands (get_all_markets, get_category_markets, search_markets, get_open_markets, get_closed_markets) and get_market return each market with a nested `latest_change` object: `{ "datetime", "yes_price", "no_price", "volume", "midpoint", "spread" }` from the most recent `market_change` row. Use this for current price data without a separate get_market_trends call.
+
 ### get_all_markets
 
-List all available markets.
+List all available markets. Each market includes `latest_change` (datetime, yes_price, no_price, volume, midpoint, spread).
 
 ```bash
 python -m polymarket_tools get_all_markets [--limit N]
@@ -46,7 +48,7 @@ python -m polymarket_tools get_market_trends <market_id> [--limit N]
 
 ### get_category_markets
 
-List markets filtered by category (from Polymarket tags). Supports multiple categories.
+List markets filtered by category (from Polymarket tags). Supports multiple categories. Each market includes `latest_change`.
 
 ```bash
 python -m polymarket_tools get_category_markets <category> [category ...] [--limit N]
@@ -59,9 +61,24 @@ python -m polymarket_tools get_category_markets <category> [category ...] [--lim
 
 ---
 
+### search_markets
+
+Search markets by keyword in question and description. Case-insensitive. All keywords must match (AND). Each market includes `latest_change`.
+
+```bash
+python -m polymarket_tools search_markets <keyword> [keyword ...] [--limit N]
+```
+
+- `keyword`: One or more search terms (e.g., `oil`, `oil price`). Each must appear in the market's question or description.
+- `--limit`: Max markets to return (default 50).
+
+**When to use:** User asks for "oil markets," "markets about X," "search for markets with Y," or "find markets mentioning Z." Note: `description` is only populated for markets scanned via `scan --market`; most markets are searched via `question` only.
+
+---
+
 ### get_closed_markets
 
-List markets that are closed or resolved.
+List markets that are closed or resolved. Each market includes `latest_change`.
 
 ```bash
 python -m polymarket_tools get_closed_markets [--limit N]
@@ -75,7 +92,7 @@ python -m polymarket_tools get_closed_markets [--limit N]
 
 ### get_open_markets
 
-List markets that are open and accepting orders.
+List markets that are open and accepting orders. Each market includes `latest_change`.
 
 ```bash
 python -m polymarket_tools get_open_markets [--limit N]
@@ -89,7 +106,7 @@ python -m polymarket_tools get_open_markets [--limit N]
 
 ### get_market
 
-Return full market details including enriched fields (volume, liquidity, description, tags, extra_info, etc.). These fields are only populated when the market was scanned via `scan --market`.
+Return full market details including enriched fields (volume, liquidity, description, tags, extra_info, etc.) and `latest_change`. Enriched fields are only populated when the market was scanned via `scan --market`.
 
 ```bash
 python -m polymarket_tools get_market <market_id>
@@ -97,7 +114,7 @@ python -m polymarket_tools get_market <market_id>
 
 - `market_id`: Polymarket condition_id (e.g., `0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b`).
 
-**When to use:** User asks for full details about a specific market, including volume, liquidity, description, resolution source, or other enriched metadata. List commands (get_all_markets, get_open_markets, etc.) do not return these fields.
+**When to use:** User asks for full details about a specific market, including volume, liquidity, description, resolution source, or other enriched metadata. List commands (get_all_markets, get_open_markets, etc.) do not return enriched fields but do include `latest_change`.
 
 ---
 
@@ -220,3 +237,6 @@ python -m polymarket_tools poll [--interval M] [--limit N] [--all]
 
 4. User: "List closed politics markets."
    - Run: `python -m polymarket_tools get_closed_markets --limit 50`, then filter by category Politics, or run `python -m polymarket_tools get_category_markets Politics` and filter client-side for closed status.
+
+5. User: "Find oil markets" or "Search for markets about oil."
+   - Run: `python -m polymarket_tools search_markets oil --limit 20`
