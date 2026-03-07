@@ -63,16 +63,18 @@ python -m polymarket_tools get_category_markets <category> [category ...] [--lim
 
 ### search_markets
 
-Search markets by keyword in question and description. Case-insensitive. All keywords must match (AND). Each market includes `latest_change`.
+Search markets by keyword in question and description. Case-insensitive. By default, any keyword matches (OR). Use `--and` to require all keywords (AND). Each market includes `latest_change`.
 
 ```bash
-python -m polymarket_tools search_markets <keyword> [keyword ...] [--limit N]
+python -m polymarket_tools search_markets <keyword> [keyword ...] [--limit N] [--all] [--and]
 ```
 
-- `keyword`: One or more search terms (e.g., `oil`, `oil price`). Each must appear in the market's question or description.
+- `keyword`: One or more search terms (e.g., `oil`, `price`). Default: any keyword matches (OR).
 - `--limit`: Max markets to return (default 50).
+- `--all`: Return all matching markets (no limit). Use when you don't know the DB size.
+- `--and`: Require all keywords to match (AND). Omit for OR (any keyword matches).
 
-**When to use:** User asks for "oil markets," "markets about X," "search for markets with Y," or "find markets mentioning Z." Note: `description` is only populated for markets scanned via `scan --market`; most markets are searched via `question` only.
+**When to use:** User asks for "oil markets," "markets about X," "search for markets with Y," or "find markets mentioning Z." Use `--and` when the user wants markets containing all terms (e.g., "oil AND price"). Note: `description` is only populated for markets scanned via `scan --market`; most markets are searched via `question` only.
 
 ---
 

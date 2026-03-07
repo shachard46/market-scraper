@@ -194,8 +194,9 @@ def _cmd_search_markets(args: argparse.Namespace) -> int:
     if not keywords:
         print("Error: at least one keyword required", file=sys.stderr)
         return 1
-    limit = getattr(args, "limit", 50)
-    data = tools.search_markets(keywords=keywords, limit=limit)
+    limit = None if getattr(args, "all", False) else getattr(args, "limit", 50)
+    match_all = getattr(args, "match_all", False)
+    data = tools.search_markets(keywords=keywords, limit=limit, match_all=match_all)
     print(json.dumps(data, indent=2))
     return 0
 
@@ -261,8 +262,10 @@ def main() -> int:
     qf_p.set_defaults(handler=_cmd_query_market_field)
 
     s_p = sub.add_parser("search_markets")
-    s_p.add_argument("keywords", nargs="+", help="Search terms (e.g., oil, oil price)")
+    s_p.add_argument("keywords", nargs="+", help="Search terms (e.g., oil, price)")
     s_p.add_argument("--limit", type=int, default=50, help="Max markets to return (default: 50)")
+    s_p.add_argument("--all", action="store_true", help="Return all matching markets (no limit)")
+    s_p.add_argument("--and", dest="match_all", action="store_true", help="Require all keywords to match (default: any keyword matches)")
     s_p.set_defaults(handler=_cmd_search_markets)
 
     args = parser.parse_args()
