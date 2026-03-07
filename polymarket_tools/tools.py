@@ -57,6 +57,76 @@ def _model_to_dict(
     return result
 
 
+def _build_market_dict_with_change(
+    market,
+    change,
+    exclude: set[str] | None = None,
+    parse_extra_info: bool = False,
+) -> dict:
+    """Build market dict with nested latest_change from MarketChange row."""
+    result = _model_to_dict(market, exclude=exclude, parse_extra_info=parse_extra_info)
+    if change is None:
+        result["latest_change"] = None
+    else:
+        result["latest_change"] = {
+            "datetime": _serialize_value(change.datetime),
+            "yes_price": change.yes_price,
+            "no_price": change.no_price,
+            "volume": change.volume,
+            "midpoint": change.midpoint,
+            "spread": change.spread,
+        }
+    return result
+
+
+def _markets_with_change_stmt():
+    """Base select: Market LEFT JOIN MarketChange on change_id."""
+    return (
+        select(Market, MarketChange)
+        .select_from(Market)
+        .outerjoin(MarketChange, Market.change_id == MarketChange.change_id)
+    )
+
+
+def _open_market_filter(stmt):
+    """Apply filter for open/active markets (outcome IS NULL, status = 'active')."""
+    return stmt.where(Market.outcome.is_(None)).where(Market.status == "active")
+
+
+def _fetch_markets_with_change(
+    session,
+    stmt,
+    *,
+    exclude: frozenset[str] | set[str] | None = None,
+    parse_extra_info: bool = False,
+) -> list[dict]:
+    """Execute stmt (Market, MarketChange rows) and return list of market dicts with latest_change."""
+    exclude = exclude if exclude is not None else EXTRA_FIELDS
+    rows = session.execute(stmt).all()
+    return [
+        _build_market_dict_with_change(m, c, exclude=exclude, parse_extra_info=parse_extra_info)
+        for m, c in rows
+    ]
+
+
+def _fetch_single_market_with_change(
+    session,
+    stmt,
+    *,
+    include_extra: bool = True,
+) -> dict | None:
+    """Execute stmt (single Market, MarketChange row) and return market dict or None."""
+    row = session.execute(stmt).first()
+    if row is None:
+        return None
+    m, c = row
+    return _build_market_dict_with_change(
+        m, c,
+        exclude=None if include_extra else EXTRA_FIELDS,
+        parse_extra_info=include_extra,
+    )
+
+
 def get_all_markets(limit: int = 50) -> list[dict]:
     """
     Return all available markets from the database.
@@ -68,13 +138,8 @@ def get_all_markets(limit: int = 50) -> list[dict]:
         List of market dicts with market_id, question, slug, status, etc.
     """
     with db.get_session() as session:
-        stmt = (
-            select(Market)
-            .order_by(Market.change_id.desc())
-            .limit(limit)
-        )
-        rows = session.scalars(stmt).all()
-    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
+        stmt = _markets_with_change_stmt().order_by(Market.change_id.desc()).limit(limit)
+        return _fetch_markets_with_change(session, stmt)
 
 
 def get_market(market_id: str, include_extra: bool = True) -> dict | None:
@@ -91,15 +156,8 @@ def get_market(market_id: str, include_extra: bool = True) -> dict | None:
         Market dict with all columns, or None if not found.
     """
     with db.get_session() as session:
-        stmt = select(Market).where(Market.market_id == market_id)
-        market = session.scalar(stmt)
-        if market is None:
-            return None
-        return _model_to_dict(
-            market,
-            exclude=None if include_extra else EXTRA_FIELDS,
-            parse_extra_info=include_extra,
-        )
+        stmt = _markets_with_change_stmt().where(Market.market_id == market_id)
+        return _fetch_single_market_with_change(session, stmt, include_extra=include_extra)
 
 
 def get_market_trends(market_id: str, limit: int = 50) -> list[dict]:
@@ -140,13 +198,12 @@ def get_category_markets(category_names: list[str], limit: int = 50) -> list[dic
     """
     with db.get_session() as session:
         stmt = (
-            select(Market)
+            _markets_with_change_stmt()
             .where(Market.market_category.in_(category_names))
             .order_by(Market.change_id.desc())
             .limit(limit)
         )
-        rows = session.scalars(stmt).all()
-    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
+        return _fetch_markets_with_change(session, stmt)
 
 
 def get_closed_markets(limit: int = 50) -> list[dict]:
@@ -163,7 +220,7 @@ def get_closed_markets(limit: int = 50) -> list[dict]:
     """
     with db.get_session() as session:
         stmt = (
-            select(Market)
+            _markets_with_change_stmt()
             .where(
                 (Market.outcome.isnot(None)) |
                 (Market.status.in_(["closed", "archived"]))
@@ -171,8 +228,7 @@ def get_closed_markets(limit: int = 50) -> list[dict]:
             .order_by(Market.change_id.desc())
             .limit(limit)
         )
-        rows = session.scalars(stmt).all()
-    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
+        return _fetch_markets_with_change(session, stmt)
 
 
 def get_open_markets(limit: int = 50) -> list[dict]:
@@ -188,15 +244,10 @@ def get_open_markets(limit: int = 50) -> list[dict]:
         List of market dicts for open/active markets.
     """
     with db.get_session() as session:
-        stmt = (
-            select(Market)
-            .where(Market.outcome.is_(None))
-            .where(Market.status == "active")
-            .order_by(Market.change_id.desc())
-            .limit(limit)
-        )
-        rows = session.scalars(stmt).all()
-    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
+        stmt = _open_market_filter(_markets_with_change_stmt()).order_by(
+            Market.change_id.desc()
+        ).limit(limit)
+        return _fetch_markets_with_change(session, stmt)
 
 
 def get_stale_open_markets(limit: int = 200) -> list[dict]:
@@ -213,15 +264,10 @@ def get_stale_open_markets(limit: int = 200) -> list[dict]:
         List of market dicts for open/active markets, oldest-refreshed first.
     """
     with db.get_session() as session:
-        stmt = (
-            select(Market)
-            .where(Market.outcome.is_(None))
-            .where(Market.status == "active")
-            .order_by(Market.change_id.asc())
-            .limit(limit)
-        )
-        rows = session.scalars(stmt).all()
-    return [_model_to_dict(r, exclude=EXTRA_FIELDS) for r in rows]
+        stmt = _open_market_filter(_markets_with_change_stmt()).order_by(
+            Market.change_id.asc()
+        ).limit(limit)
+        return _fetch_markets_with_change(session, stmt)
 
 
 def query_market_field(market_id: str, field_name: str) -> str | None:
