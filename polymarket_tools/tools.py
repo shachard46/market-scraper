@@ -8,7 +8,7 @@ get_closed_markets, get_open_markets, and query_market_field.
 import json
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from . import db
 from .db import Market, MarketChange
@@ -190,13 +190,19 @@ def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def search_markets(keywords: list[str], limit: int = 50) -> list[dict]:
+def search_markets(
+    keywords: list[str],
+    limit: int | None = 50,
+    match_all: bool = False,
+) -> list[dict]:
     """
-    Return markets where question or description contains all keywords (case-insensitive).
+    Return markets where question or description contains the keywords (case-insensitive).
 
     Args:
-        keywords: One or more search terms; each must appear in question or description.
-        limit: Maximum number of markets to return. Default 50.
+        keywords: One or more search terms.
+        limit: Maximum number of markets to return. Default 50. None = no limit (all matches).
+        match_all: If True, all keywords must match (AND). If False (default), any keyword
+            can match (OR).
 
     Returns:
         List of market dicts with latest_change.
@@ -205,16 +211,22 @@ def search_markets(keywords: list[str], limit: int = 50) -> list[dict]:
         return []
     with db.get_session() as session:
         stmt = _markets_with_change_stmt()
+        keyword_conditions = []
         for kw in keywords:
             pattern = f"%{_like_escape(kw)}%".lower()
-            stmt = stmt.where(
-                or_(
-                    func.lower(Market.question).like(pattern),
-                    (Market.description.isnot(None))
-                    & func.lower(Market.description).like(pattern),
-                )
+            kw_match = or_(
+                func.lower(Market.question).like(pattern),
+                (Market.description.isnot(None))
+                & func.lower(Market.description).like(pattern),
             )
-        stmt = stmt.order_by(Market.change_id.desc()).limit(limit)
+            keyword_conditions.append(kw_match)
+        if match_all:
+            stmt = stmt.where(and_(*keyword_conditions))
+        else:
+            stmt = stmt.where(or_(*keyword_conditions))
+        stmt = stmt.order_by(Market.change_id.desc())
+        if limit is not None:
+            stmt = stmt.limit(limit)
         return _fetch_markets_with_change(session, stmt)
 
 
