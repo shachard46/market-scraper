@@ -8,7 +8,7 @@ get_closed_markets, get_open_markets, and query_market_field.
 import json
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from . import db
 from .db import Market, MarketChange
@@ -183,6 +183,39 @@ def get_market_trends(market_id: str, limit: int = 50) -> list[dict]:
         )
         rows = session.scalars(stmt).all()
     return [_model_to_dict(r) for r in rows]
+
+
+def _like_escape(value: str) -> str:
+    """Escape % and _ for safe use in SQL LIKE patterns."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def search_markets(keywords: list[str], limit: int = 50) -> list[dict]:
+    """
+    Return markets where question or description contains all keywords (case-insensitive).
+
+    Args:
+        keywords: One or more search terms; each must appear in question or description.
+        limit: Maximum number of markets to return. Default 50.
+
+    Returns:
+        List of market dicts with latest_change.
+    """
+    if not keywords:
+        return []
+    with db.get_session() as session:
+        stmt = _markets_with_change_stmt()
+        for kw in keywords:
+            pattern = f"%{_like_escape(kw)}%".lower()
+            stmt = stmt.where(
+                or_(
+                    func.lower(Market.question).like(pattern),
+                    (Market.description.isnot(None))
+                    & func.lower(Market.description).like(pattern),
+                )
+            )
+        stmt = stmt.order_by(Market.change_id.desc()).limit(limit)
+        return _fetch_markets_with_change(session, stmt)
 
 
 def get_category_markets(category_names: list[str], limit: int = 50) -> list[dict]:
