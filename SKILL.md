@@ -15,11 +15,11 @@ The background polling loop runs automatically (e.g., via cron, systemd, or Open
 
 Invoke these via the shell (e.g., `python -m polymarket_tools <command> [args]`). Run from the project root (`market-scarper/`) or ensure `polymarket_tools` is on `PYTHONPATH`.
 
-**Response format:** All market list commands (get_all_markets, get_category_markets, search_markets, get_open_markets, get_closed_markets) and get_market return each market with a nested `latest_change` object: `{ "datetime", "yes_price", "no_price", "volume", "midpoint", "spread" }` from the most recent `market_change` row. Use this for current price data without a separate get_market_trends call.
+**Response format:** All market list commands (get_all_markets, get_category_markets, search_markets, get_open_markets, get_closed_markets) and get_market return each market with a nested `latest_change` object: `{ "datetime", "yes_price", "no_price", "volume", "liquidity", "last_trade_price", "midpoint", "spread" }` from the most recent `market_change` row. Volume and liquidity are stored in market_change and populated when the market was scanned via `scan --market` or sample_refresh.
 
 ### get_all_markets
 
-List all available markets. Each market includes `latest_change` (datetime, yes_price, no_price, volume, midpoint, spread).
+List all available markets. Each market includes `latest_change` (datetime, yes_price, no_price, volume, liquidity, last_trade_price, midpoint, spread).
 
 ```bash
 python -m polymarket_tools get_all_markets [--limit N]
@@ -108,7 +108,7 @@ python -m polymarket_tools get_open_markets [--limit N]
 
 ### get_market
 
-Return full market details including enriched fields (volume, liquidity, description, tags, extra_info, etc.) and `latest_change`. Enriched fields are only populated when the market was scanned via `scan --market`.
+Return full market details including enriched fields (description, tags, extra_info, etc.) and `latest_change`. Volume and liquidity are in `latest_change` (from market_change); enriched metadata is populated when the market was scanned via `scan --market`.
 
 ```bash
 python -m polymarket_tools get_market <market_id>
@@ -129,7 +129,7 @@ python -m polymarket_tools query_market_field <market_id> <field_name>
 ```
 
 - `market_id`: Polymarket condition_id.
-- `field_name`: One of `market_id`, `clob_token_ids`, `status`, `question`, `slug`, `yes_token_id`, `no_token_id`, `last_trade_price`, `minimum_tick_size`, `neg_risk`, `change_id`, `outcome`, `market_category`, or enriched fields (`volume`, `liquidity`, `start_date`, `category`, `tags`, `market_type`, `description`, `extra_info`) when the market was scanned with `scan --market`.
+- `field_name`: One of `market_id`, `clob_token_ids`, `status`, `question`, `slug`, `yes_token_id`, `no_token_id`, `minimum_tick_size`, `neg_risk`, `change_id`, `outcome`, `market_category`, enriched fields (`start_date`, `category`, `tags`, `market_type`, `description`, `extra_info`), or state fields (`volume`, `liquidity`, `last_trade_price`) which are read from the latest market_change row.
 
 **When to use:** User needs one specific piece of information about a market (e.g., "what is the question for market X?" or "what is the status of market Y?").
 
@@ -219,7 +219,7 @@ python -m polymarket_tools poll [--interval M] [--limit N] [--all]
 ## Database
 
 - Uses **SQLAlchemy** with SQLite and Declarative Base ORM.
-- Tables: `markets` (current state), `market_change` (historical log).
+- Tables: `markets` (current state, identity metadata), `market_change` (historical log of price/volume/liquidity snapshots). State columns (volume, liquidity, last_trade_price) live in market_change; join via change_id for current values.
 - Default path: `./polymarket.db`. Override with `POLYMARKET_DB_PATH`:
   ```bash
   export POLYMARKET_DB_PATH=/path/to/polymarket.db

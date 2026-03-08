@@ -42,7 +42,8 @@ class Market(Base):
     ORM model for the `markets` table.
 
     Reflects the current state of open/closed markets. Updated via UPSERT
-    on each scanner run.
+    on each scanner run. State columns (volume, liquidity, last_trade_price)
+    live in market_change; join via change_id for current values.
     """
     __tablename__ = "markets"
 
@@ -53,7 +54,6 @@ class Market(Base):
     slug: Mapped[str] = mapped_column(nullable=False)
     yes_token_id: Mapped[str] = mapped_column(nullable=False)
     no_token_id: Mapped[str] = mapped_column(nullable=False)
-    last_trade_price: Mapped[float | None] = mapped_column(nullable=True)
     minimum_tick_size: Mapped[float | None] = mapped_column(nullable=True)
     neg_risk: Mapped[bool] = mapped_column(nullable=False)
     change_id: Mapped[int | None] = mapped_column(
@@ -63,8 +63,6 @@ class Market(Base):
     outcome: Mapped[str | None] = mapped_column(nullable=True)
     market_category: Mapped[str] = mapped_column(nullable=False)
     # Enriched columns: populated only when scraped via single-market fetch
-    volume: Mapped[float | None] = mapped_column(nullable=True)
-    liquidity: Mapped[float | None] = mapped_column(nullable=True)
     start_date: Mapped[dt | None] = mapped_column(DateTime, nullable=True)
     category: Mapped[str | None] = mapped_column(nullable=True)
     tags: Mapped[str | None] = mapped_column(nullable=True)  # JSON array
@@ -77,7 +75,8 @@ class MarketChange(Base):
     """
     ORM model for the `market_change` table.
 
-    Log of price/volume/midpoint/spread snapshots. INSERT-only on each scan.
+    Log of price/volume/liquidity/midpoint/spread snapshots. INSERT-only on each scan.
+    State columns (volume, liquidity, last_trade_price) are stored here per snapshot.
     """
     __tablename__ = "market_change"
 
@@ -87,7 +86,9 @@ class MarketChange(Base):
     market_id: Mapped[str] = mapped_column(nullable=False)
     yes_price: Mapped[float] = mapped_column(nullable=False)
     no_price: Mapped[float] = mapped_column(nullable=False)
-    volume: Mapped[float] = mapped_column(nullable=False)
+    volume: Mapped[float | None] = mapped_column(nullable=True)  # From Gamma enriched; 0.0 if none
+    liquidity: Mapped[float | None] = mapped_column(nullable=True)  # From Gamma enriched
+    last_trade_price: Mapped[float | None] = mapped_column(nullable=True)  # From orderbook/API
     midpoint: Mapped[float | None] = mapped_column(nullable=True)
     spread: Mapped[float | None] = mapped_column(nullable=True)
 
@@ -140,8 +141,6 @@ def get_session() -> Generator[Session, None, None]:
 
 
 _ENRICHED_COLUMNS = [
-    ("volume", "REAL"),
-    ("liquidity", "REAL"),
     ("start_date", "TIMESTAMP"),
     ("category", "TEXT"),
     ("tags", "TEXT"),
@@ -182,4 +181,7 @@ def setup_db() -> Path:
     Base.metadata.create_all(engine)
     if path.exists():
         _migrate_add_enriched_columns(engine)
+        from .migrate_state_to_market_change import run_migration
+
+        run_migration()
     return path

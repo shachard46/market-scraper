@@ -14,15 +14,18 @@ from . import db
 from .db import Market, MarketChange
 
 # Enriched columns: excluded from list endpoints, included only in get_market
+# Note: volume, liquidity are now in latest_change (market_change table)
 EXTRA_FIELDS = frozenset({
-    "volume", "liquidity", "start_date", "category", "tags",
+    "start_date", "category", "tags",
     "market_type", "description", "extra_info",
 })
 
-# Valid field names for query_market_field (must match Market model columns)
+# Valid field names for query_market_field
 _MARKET_QUERYABLE_FIELDS = frozenset(
     c.key for c in Market.__table__.columns
 )
+# State fields that live in market_change; read from latest change via change_id
+_CHANGE_SOURCED_FIELDS = frozenset({"volume", "liquidity", "last_trade_price"})
 
 
 def _serialize_value(v) -> str | float | int | bool | None:
@@ -73,6 +76,8 @@ def _build_market_dict_with_change(
             "yes_price": change.yes_price,
             "no_price": change.no_price,
             "volume": change.volume,
+            "liquidity": change.liquidity,
+            "last_trade_price": change.last_trade_price,
             "midpoint": change.midpoint,
             "spread": change.spread,
         }
@@ -319,31 +324,45 @@ def query_market_field(market_id: str, field_name: str) -> str | None:
     """
     Return a single field value for a market by market_id.
 
-    The field_name is validated against the Market model's actual columns
-    to prevent attribute errors.
+    Supports both Market columns and state fields (volume, liquidity,
+    last_trade_price) which are read from the latest market_change row.
 
     Args:
         market_id: Polymarket condition_id.
-        field_name: Name of the Market column (e.g., 'question', 'status',
-                    'slug', 'outcome', 'market_category').
+        field_name: Name of the field (e.g., 'question', 'status', 'volume',
+                    'liquidity', 'last_trade_price').
 
     Returns:
         The column value as a string representation, or None if market
         not found or field is null.
 
     Raises:
-        ValueError: If field_name is not a valid Market column.
+        ValueError: If field_name is not a valid field.
     """
-    if field_name not in _MARKET_QUERYABLE_FIELDS:
+    all_fields = _MARKET_QUERYABLE_FIELDS | _CHANGE_SOURCED_FIELDS
+    if field_name not in all_fields:
         raise ValueError(
             f"Invalid field_name '{field_name}'. "
-            f"Must be one of: {sorted(_MARKET_QUERYABLE_FIELDS)}"
+            f"Must be one of: {sorted(all_fields)}"
         )
 
     with db.get_session() as session:
-        stmt = select(Market).where(Market.market_id == market_id)
-        market = session.scalar(stmt)
-        if market is None:
-            return None
-        value = getattr(market, field_name)
+        if field_name in _CHANGE_SOURCED_FIELDS:
+            stmt = (
+                select(Market, MarketChange)
+                .select_from(Market)
+                .outerjoin(MarketChange, Market.change_id == MarketChange.change_id)
+                .where(Market.market_id == market_id)
+            )
+            row = session.execute(stmt).first()
+            if row is None:
+                return None
+            _m, change = row
+            value = getattr(change, field_name) if change else None
+        else:
+            stmt = select(Market).where(Market.market_id == market_id)
+            market = session.scalar(stmt)
+            if market is None:
+                return None
+            value = getattr(market, field_name)
         return str(value) if value is not None else None
