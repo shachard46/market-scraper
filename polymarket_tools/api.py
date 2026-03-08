@@ -281,13 +281,18 @@ def fetch_market(identifier: str) -> dict[str, Any] | None:
         else:
             resp = requests.get(
                 f"{GAMMA_URL}/markets",
-                params={"condition_id": id_},
+                params={"condition_id": id_, "limit": 100},
                 timeout=15,
             )
         resp.raise_for_status()
         data = resp.json()
         if isinstance(data, list):
-            return data[0] if data else None
+            id_lower = id_.lower()
+            for m in data:
+                cid = m.get("conditionId") or m.get("condition_id")
+                if cid and str(cid).lower() == id_lower:
+                    return m
+            return None
         return data
     except (requests.RequestException, ValueError, KeyError, IndexError):
         return None

@@ -166,11 +166,28 @@ def _persist_market(
         m, yes_token_id, yes_book=yes_book, use_api=use_api_for_price
     )
 
+    volume = enriched.get("volume") if enriched else None
+    if volume is not None:
+        try:
+            volume = float(volume)
+        except (TypeError, ValueError):
+            volume = 0.0
+    elif enriched is not None:
+        volume = 0.0
+    liquidity = enriched.get("liquidity") if enriched else None
+    if liquidity is not None:
+        try:
+            liquidity = float(liquidity)
+        except (TypeError, ValueError):
+            liquidity = None
+
     change = MarketChange(
         market_id=condition_id,
         yes_price=yes_price,
         no_price=no_price,
-        volume=0.0,
+        volume=volume if volume is not None else 0.0,
+        liquidity=liquidity,
+        last_trade_price=last_trade_price,
         midpoint=mid,
         spread=spread,
     )
@@ -202,7 +219,6 @@ def _persist_market(
         "slug": slug,
         "yes_token_id": yes_token_id,
         "no_token_id": no_token_id,
-        "last_trade_price": last_trade_price,
         "minimum_tick_size": minimum_tick_size,
         "neg_risk": neg_risk,
         "change_id": change_id,
@@ -211,21 +227,19 @@ def _persist_market(
     }
     set_cols = [
         "clob_token_ids", "status", "question", "slug",
-        "yes_token_id", "no_token_id", "last_trade_price", "minimum_tick_size",
+        "yes_token_id", "no_token_id", "minimum_tick_size",
         "neg_risk", "change_id", "outcome", "market_category",
     ]
 
     if enriched:
-        values["volume"] = enriched.get("volume")
-        values["liquidity"] = enriched.get("liquidity")
         values["start_date"] = enriched.get("start_date")
         values["category"] = enriched.get("category")
         values["tags"] = enriched.get("tags")
         values["market_type"] = enriched.get("market_type")
         values["description"] = enriched.get("description")
         values["extra_info"] = enriched.get("extra_info")
-        set_cols.extend(["volume", "liquidity", "start_date", "category",
-                        "tags", "market_type", "description", "extra_info"])
+        set_cols.extend(["start_date", "category", "tags", "market_type",
+                        "description", "extra_info"])
 
     stmt = insert(Market).values(**values)
     stmt = stmt.on_conflict_do_update(
@@ -246,7 +260,12 @@ def scan_single_market(identifier: str) -> bool:
     Returns:
         True if market was found and persisted, False otherwise.
     """
-    gamma_market = api.fetch_market(identifier)
+    id_ = identifier.strip()
+    if not api._is_slug(id_):
+        slug = tools.query_market_field(id_, "slug")
+        if slug:
+            id_ = slug
+    gamma_market = api.fetch_market(id_)
     if not gamma_market:
         return False
     m = api._gamma_to_clob_format(gamma_market)
@@ -330,7 +349,8 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
     print(f"Refreshing {len(rows)} stale open markets...", file=sys.stderr)
     markets: list[dict[str, Any]] = []
     for r in rows:
-        yes_price = r.get("last_trade_price")
+        latest = r.get("latest_change") or {}
+        yes_price = latest.get("last_trade_price") or latest.get("yes_price")
         if yes_price is None:
             yes_price = 0.5
         else:
@@ -370,8 +390,10 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
             condition_id = m.get("condition_id")
             enriched: dict[str, Any] | None = None
             if condition_id:
+                slug = m.get("market_slug") or ""
+                identifier = slug if slug else condition_id
                 try:
-                    gamma_market = api.fetch_market(condition_id)
+                    gamma_market = api.fetch_market(identifier)
                     if gamma_market:
                         enriched = api._extract_enriched_fields(gamma_market)
                     else:
