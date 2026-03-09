@@ -3,6 +3,7 @@ CLI entry point for Polymarket tools.
 
 Commands:
     setup                Initialize the SQLite database
+    set_wal              Set SQLite journal mode to WAL (better concurrent read/write)
     scan                 Run a single scan (for cron/scheduled runs)
     sync_closed_markets  Sync markets that have closed since last scan
     sample_refresh       Periodically refresh stale open markets (gentle API usage)
@@ -31,6 +32,16 @@ def _cmd_setup(_: argparse.Namespace) -> int:
     path = db.setup_db()
     print(f"Database initialized at {path}", file=sys.stderr)
     return 0
+
+
+def _cmd_set_wal(_: argparse.Namespace) -> int:
+    """Set SQLite journal mode to WAL for better concurrent access."""
+    from .set_wal_mode import set_wal_mode
+
+    if set_wal_mode():
+        print("Journal mode set to WAL", file=sys.stderr)
+        return 0
+    return 1
 
 
 def _cmd_scan(args: argparse.Namespace) -> int:
@@ -207,6 +218,9 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("setup").set_defaults(handler=_cmd_setup)
+    sub.add_parser("set_wal", help="Set journal mode to WAL (reduces 'database is locked' errors)").set_defaults(
+        handler=_cmd_set_wal
+    )
     scan_p = sub.add_parser("scan")
     scan_p.add_argument("--limit", type=int, default=None, help="Max markets to scan (default: all)")
     scan_p.add_argument("--all", action="store_false", dest="active_only", help="Include closed/archived markets")
