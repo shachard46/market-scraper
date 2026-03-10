@@ -157,18 +157,30 @@ def _gamma_to_clob_format(m: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _fetch_gamma_markets() -> list[dict[str, Any]]:
-    """Fetch active markets from Gamma API (supports active/closed filtering)."""
+def _fetch_gamma_markets(limit: int | None = None) -> list[dict[str, Any]]:
+    """
+    Fetch active markets from Gamma API (supports active/closed filtering).
+
+    Args:
+        limit: Max markets to request. If None, fetch all (paginated).
+    """
     print("Fetching active markets...", file=sys.stderr)
     all_markets: list[dict[str, Any]] = []
     offset = 0
     while True:
+        request_limit = GAMMA_PAGE_LIMIT
+        if limit is not None and limit > 0:
+            remaining = limit - len(all_markets)
+            if remaining <= 0:
+                break
+            request_limit = min(remaining, GAMMA_PAGE_LIMIT)
+
         resp = requests.get(
             f"{GAMMA_URL}/markets",
             params={
                 "active": "true",
                 "closed": "false",
-                "limit": GAMMA_PAGE_LIMIT,
+                "limit": request_limit,
                 "offset": offset,
             },
             timeout=30,
@@ -180,12 +192,12 @@ def _fetch_gamma_markets() -> list[dict[str, Any]]:
             break
         all_markets.extend(markets)
         n = len(all_markets)
-        if n % GAMMA_FETCH_PROGRESS_INTERVAL == 0 or len(markets) < GAMMA_PAGE_LIMIT:
+        if n % GAMMA_FETCH_PROGRESS_INTERVAL == 0 or len(markets) < request_limit:
             print(f"  Fetched {n} markets...", file=sys.stderr)
-        if len(markets) < GAMMA_PAGE_LIMIT:
+        if len(markets) < request_limit or (limit is not None and n >= limit):
             break
-        offset += GAMMA_PAGE_LIMIT
-    return all_markets
+        offset += len(markets)
+    return all_markets[:limit] if limit is not None and limit > 0 else all_markets
 
 
 def fetch_closed_gamma_markets(limit: int = 500) -> list[dict[str, Any]]:
@@ -298,7 +310,7 @@ def fetch_market(identifier: str) -> dict[str, Any] | None:
         return None
 
 
-def fetch_markets(active_only: bool = True) -> list[dict[str, Any]]:
+def fetch_markets(active_only: bool = True, limit: int | None = None) -> list[dict[str, Any]]:
     """
     Fetch markets for scanning.
 
@@ -311,6 +323,9 @@ def fetch_markets(active_only: bool = True) -> list[dict[str, Any]]:
     Args:
         active_only: If True (default), fetch only active markets via Gamma API.
             If False, fetch all markets from CLOB API.
+        limit: Max markets to request from API. If None, fetch all. Applied
+            at the API level for active_only=True (Gamma); for CLOB, applied
+            post-fetch.
 
     Returns:
         List of market objects in CLOB-like format (condition_id, question,
@@ -318,7 +333,7 @@ def fetch_markets(active_only: bool = True) -> list[dict[str, Any]]:
     """
     try:
         if active_only:
-            gamma_markets = _fetch_gamma_markets()
+            gamma_markets = _fetch_gamma_markets(limit=limit)
             return [_gamma_to_clob_format(m) for m in gamma_markets]
         print("Fetching markets from CLOB...", file=sys.stderr)
         resp = requests.get(f"{BASE_URL}/markets", timeout=30)
@@ -330,6 +345,8 @@ def fetch_markets(active_only: bool = True) -> list[dict[str, Any]]:
             markets = data
         else:
             markets = []
+        if limit is not None and limit > 0:
+            markets = markets[:limit]
         print(f"  Fetched {len(markets)} markets.", file=sys.stderr)
         return markets
     except (requests.RequestException, ValueError) as e:

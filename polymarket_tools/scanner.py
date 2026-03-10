@@ -289,7 +289,8 @@ def scan_once(
         4. UPSERT row into markets using SQLite INSERT ... ON CONFLICT DO UPDATE.
 
     Args:
-        limit: Optional max number of markets to process (for testing).
+        limit: Optional max number of markets to fetch and process. Passed to API
+            (Gamma) so only requested count is fetched.
         active_only: If True (default), fetch only active markets. If False, fetch all.
         batch_only: If True, use only batch API calls (POST /books) - no per-market
             fetch_orderbook or fetch_last_trade_price. Faster but may miss orderbooks
@@ -298,9 +299,7 @@ def scan_once(
     Returns:
         Number of markets processed successfully.
     """
-    markets = api.fetch_markets(active_only=active_only)
-    if limit is not None and limit > 0:
-        markets = markets[:limit]
+    markets = api.fetch_markets(active_only=active_only, limit=limit)
     total = len(markets)
     print(f"Scanning {total} markets...", file=sys.stderr)
 
