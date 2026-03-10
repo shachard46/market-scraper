@@ -25,12 +25,13 @@ import sys
 from typing import NoReturn
 
 from . import db, scanner, tools
+from .log import log
 
 
 def _cmd_setup(_: argparse.Namespace) -> int:
     """Initialize the database."""
     path = db.setup_db()
-    print(f"Database initialized at {path}", file=sys.stderr)
+    log(f"Database initialized at {path}")
     return 0
 
 
@@ -39,7 +40,7 @@ def _cmd_set_wal(_: argparse.Namespace) -> int:
     from .set_wal_mode import set_wal_mode
 
     if set_wal_mode():
-        print("Journal mode set to WAL", file=sys.stderr)
+        log("Journal mode set to WAL")
         return 0
     return 1
 
@@ -51,22 +52,22 @@ def _cmd_scan(args: argparse.Namespace) -> int:
         try:
             ok = scanner.scan_single_market(market_id)
             if ok:
-                print(f"Scanned market: {market_id}", file=sys.stderr)
+                log(f"Scanned market: {market_id}")
                 return 0
-            print(f"Market not found: {market_id}", file=sys.stderr)
+            log(f"Market not found: {market_id}")
             return 1
         except Exception as e:
-            print(f"Scan failed: {e}", file=sys.stderr)
+            log(f"Scan failed: {e}")
             return 1
     limit = getattr(args, "limit", None)
     active_only = getattr(args, "active_only", True)
     batch_only = getattr(args, "batch_only", False)
     try:
         n = scanner.scan_once(limit=limit, active_only=active_only, batch_only=batch_only)
-        print(f"Scanned {n} markets", file=sys.stderr)
+        log(f"Scanned {n} markets")
         return 0
     except Exception as e:
-        print(f"Scan failed: {e}", file=sys.stderr)
+        log(f"Scan failed: {e}")
         return 1
 
 
@@ -75,10 +76,10 @@ def _cmd_sync_closed_markets(args: argparse.Namespace) -> int:
     limit = getattr(args, "limit", 500)
     try:
         n = scanner.sync_closed_markets(limit=limit)
-        print(f"Synced {n} closed markets", file=sys.stderr)
+        log(f"Synced {n} closed markets")
         return 0
     except Exception as e:
-        print(f"Sync failed: {e}", file=sys.stderr)
+        log(f"Sync failed: {e}")
         return 1
 
 
@@ -86,15 +87,15 @@ def _cmd_sample_refresh(args: argparse.Namespace) -> NoReturn:
     """Periodically refresh stale open markets from DB."""
     limit = getattr(args, "limit", 200)
     interval = getattr(args, "interval", 60)  # seconds
-    print(f"Starting sample_refresh loop (limit={limit}, interval={interval}s)", file=sys.stderr)
+    log(f"Starting sample_refresh loop (limit={limit}, interval={interval}s)")
 
     async def loop() -> None:
         while True:
             try:
                 n = scanner.refresh_sample_open_markets(limit=limit)
-                print(f"[sample_refresh] Refreshed {n} markets", file=sys.stderr)
+                log(f"[sample_refresh] Refreshed {n} markets")
             except Exception as e:
-                print(f"[sample_refresh] Error: {e}", file=sys.stderr)
+                log(f"[sample_refresh] Error: {e}")
             await asyncio.sleep(interval)
 
     asyncio.run(loop())
@@ -103,7 +104,7 @@ def _cmd_sample_refresh(args: argparse.Namespace) -> NoReturn:
 def _cmd_poll(args: argparse.Namespace) -> NoReturn:
     """Run the polling loop indefinitely."""
     interval = getattr(args, "interval", 5) * 60  # seconds
-    print(f"Starting poll loop (interval={interval}s)", file=sys.stderr)
+    log(f"Starting poll loop (interval={interval}s)")
 
     async def loop() -> None:
         while True:
@@ -113,9 +114,9 @@ def _cmd_poll(args: argparse.Namespace) -> NoReturn:
                     active_only=getattr(args, "active_only", True),
                     batch_only=getattr(args, "batch_only", False),
                 )
-                print(f"[poll] Scanned {n} markets", file=sys.stderr)
+                log(f"[poll] Scanned {n} markets")
             except Exception as e:
-                print(f"[poll] Error: {e}", file=sys.stderr)
+                log(f"[poll] Error: {e}")
             await asyncio.sleep(interval)
 
     asyncio.run(loop())
