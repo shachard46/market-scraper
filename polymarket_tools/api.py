@@ -11,6 +11,8 @@ the CLOB API returns primarily closed/historical markets.
 import json
 import sys
 from datetime import datetime
+
+from .log import log
 from typing import Any
 
 import requests
@@ -164,7 +166,7 @@ def _fetch_gamma_markets(limit: int | None = None) -> list[dict[str, Any]]:
     Args:
         limit: Max markets to request. If None, fetch all (paginated).
     """
-    print("Fetching active markets...", file=sys.stderr)
+    log("Fetching active markets...")
     all_markets: list[dict[str, Any]] = []
     offset = 0
     while True:
@@ -193,7 +195,7 @@ def _fetch_gamma_markets(limit: int | None = None) -> list[dict[str, Any]]:
         all_markets.extend(markets)
         n = len(all_markets)
         if n % GAMMA_FETCH_PROGRESS_INTERVAL == 0 or len(markets) < request_limit:
-            print(f"  Fetched {n} markets...", file=sys.stderr)
+            log(f"  Fetched {n} markets...")
         if len(markets) < request_limit or (limit is not None and n >= limit):
             break
         offset += len(markets)
@@ -216,7 +218,7 @@ def fetch_closed_gamma_markets(limit: int = 500) -> list[dict[str, Any]]:
     Returns:
         List of raw Gamma API market objects.
     """
-    print("Fetching closed markets...", file=sys.stderr)
+    log("Fetching closed markets...")
     all_markets: list[dict[str, Any]] = []
     offset = 0
     params: dict[str, str | int] = {
@@ -255,7 +257,7 @@ def fetch_closed_gamma_markets(limit: int = 500) -> list[dict[str, Any]]:
         all_markets.extend(markets)
         n = len(all_markets)
         if n % GAMMA_FETCH_PROGRESS_INTERVAL == 0 or len(markets) < GAMMA_PAGE_LIMIT:
-            print(f"  Fetched {n} closed markets...", file=sys.stderr)
+            log(f"  Fetched {n} closed markets...")
         if len(markets) < GAMMA_PAGE_LIMIT or n >= limit:
             break
         offset += GAMMA_PAGE_LIMIT
@@ -335,7 +337,7 @@ def fetch_markets(active_only: bool = True, limit: int | None = None) -> list[di
         if active_only:
             gamma_markets = _fetch_gamma_markets(limit=limit)
             return [_gamma_to_clob_format(m) for m in gamma_markets]
-        print("Fetching markets from CLOB...", file=sys.stderr)
+        log("Fetching markets from CLOB...")
         resp = requests.get(f"{BASE_URL}/markets", timeout=30)
         resp.raise_for_status()
         data = resp.json()
@@ -347,7 +349,7 @@ def fetch_markets(active_only: bool = True, limit: int | None = None) -> list[di
             markets = []
         if limit is not None and limit > 0:
             markets = markets[:limit]
-        print(f"  Fetched {len(markets)} markets.", file=sys.stderr)
+        log(f"  Fetched {len(markets)} markets.")
         return markets
     except (requests.RequestException, ValueError) as e:
         raise RuntimeError(f"Failed to fetch markets: {e}") from e

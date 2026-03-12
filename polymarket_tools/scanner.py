@@ -6,7 +6,6 @@ market_change, then UPSERTs into markets using SQLAlchemy's SQLite insert.
 """
 
 import json
-import sys
 from typing import Any
 
 from sqlalchemy.dialects.sqlite import insert
@@ -14,6 +13,7 @@ from sqlalchemy.dialects.sqlite import insert
 PROGRESS_INTERVAL = 50
 
 from . import api, db, tools
+from .log import log
 from .db import Market, MarketChange
 
 
@@ -301,7 +301,7 @@ def scan_once(
     """
     markets = api.fetch_markets(active_only=active_only, limit=limit)
     total = len(markets)
-    print(f"Scanning {total} markets...", file=sys.stderr)
+    log(f"Scanning {total} markets...")
 
     orderbooks: dict[str, dict[str, Any]] | None = None
     if batch_only:
@@ -313,7 +313,7 @@ def scan_once(
             if no_id and no_id != yes_id:
                 token_ids.append(no_id)
         token_ids = list(dict.fromkeys(token_ids))  # preserve order, dedupe
-        print(f"  Fetching orderbooks for {len(token_ids)} tokens (batch)...", file=sys.stderr)
+        log(f"  Fetching orderbooks for {len(token_ids)} tokens (batch)...")
         orderbooks = api.fetch_orderbooks_batch(token_ids)
 
     processed = 0
@@ -322,7 +322,7 @@ def scan_once(
             if _persist_market(session, m, enriched=None, orderbooks=orderbooks):
                 processed += 1
                 if processed % PROGRESS_INTERVAL == 0:
-                    print(f"  Processed {processed}/{total} markets.", file=sys.stderr)
+                    log(f"  Processed {processed}/{total} markets.")
 
     return processed
 
@@ -345,7 +345,7 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
     if not rows:
         return 0
 
-    print(f"Refreshing {len(rows)} stale open markets...", file=sys.stderr)
+    log(f"Refreshing {len(rows)} stale open markets...")
     markets: list[dict[str, Any]] = []
     for r in rows:
         latest = r.get("latest_change") or {}
@@ -380,7 +380,7 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
         if no_id and no_id != yes_id:
             token_ids.append(no_id)
     token_ids = list(dict.fromkeys(token_ids))
-    print(f"  Fetching orderbooks for {len(token_ids)} tokens (batch)...", file=sys.stderr)
+    log(f"  Fetching orderbooks for {len(token_ids)} tokens (batch)...")
     orderbooks = api.fetch_orderbooks_batch(token_ids)
 
     processed = 0
@@ -396,22 +396,20 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
                     if gamma_market:
                         enriched = api._extract_enriched_fields(gamma_market)
                     else:
-                        print(
+                        log(
                             f"  [sample_refresh] No Gamma data for {condition_id}; "
-                            "persisting without enriched fields.",
-                            file=sys.stderr,
+                            "persisting without enriched fields."
                         )
                 except Exception as e:
-                    print(
+                    log(
                         f"  [sample_refresh] Enriched fetch failed for {condition_id}: {e}; "
-                        "persisting without enriched fields.",
-                        file=sys.stderr,
+                        "persisting without enriched fields."
                     )
 
             if _persist_market(session, m, enriched=enriched, orderbooks=orderbooks):
                 processed += 1
                 if processed % PROGRESS_INTERVAL == 0:
-                    print(f"  Refreshed {processed}/{len(markets)} markets.", file=sys.stderr)
+                    log(f"  Refreshed {processed}/{len(markets)} markets.")
     return processed
 
 
@@ -449,8 +447,8 @@ def sync_closed_markets(limit: int = 500) -> int:
             market.outcome = outcome
             updated += 1
             if updated % PROGRESS_INTERVAL == 0:
-                print(f"  Synced {updated} closed markets.", file=sys.stderr)
+                log(f"  Synced {updated} closed markets.")
 
     if updated > 0:
-        print(f"Synced {updated} markets from active to closed.", file=sys.stderr)
+        log(f"Synced {updated} markets from active to closed.")
     return updated
