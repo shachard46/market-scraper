@@ -14,6 +14,8 @@ polymarket_tools/__pycache__/
 *.pyzwzwzwzwzw
 polymarket_tools.egg-info/
 polymarket.db
+polymarket.db-shm
+polymarket.db-wal
 .cursor/
 .vscode/
 .env

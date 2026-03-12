@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime as dt
 from typing import Generator
 
-from sqlalchemy import DateTime, create_engine, ForeignKey, text
+from sqlalchemy import DateTime, create_engine, event, ForeignKey, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, sessionmaker
 
 # Default DB path; override via POLYMARKET_DB_PATH env var
@@ -102,7 +102,16 @@ def _get_engine():
     global _engine
     if _engine is None:
         url = _get_engine_url()
-        _engine = create_engine(url, echo=False)
+        # timeout: seconds to wait when DB is locked (e.g. market-ranker reading)
+        _engine = create_engine(url, echo=False, connect_args={"timeout": 30})
+
+        @event.listens_for(_engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, *_):
+            """Enable WAL and busy_timeout for better concurrent access."""
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.close()
     return _engine
 
 
