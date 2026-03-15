@@ -190,7 +190,7 @@ def setup_db() -> Path:
     Base.metadata.create_all(engine)
     if path.exists():
         _migrate_add_enriched_columns(engine)
-        from .migrate_state_to_market_change import run_migration
+        from .migrations.migrate_state_to_market_change import run_migration
 
         run_migration()
     return path
