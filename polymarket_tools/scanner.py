@@ -8,6 +8,7 @@ market_change, then UPSERTs into markets using SQLAlchemy's SQLite insert.
 import json
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert
 
 PROGRESS_INTERVAL = 50
@@ -294,14 +295,34 @@ def scan_once(
         active_only: If True (default), fetch only active markets. If False, fetch all.
         batch_only: If True, use only batch API calls (POST /books) - no per-market
             fetch_orderbook or fetch_last_trade_price. Faster but may miss orderbooks
-            for tokens that fail in the batch.
+            for tokens that fail in the batch. In batch_only mode, existing markets
+            are skipped (no market_change updates); only NEW markets are added.
 
     Returns:
         Number of markets processed successfully.
     """
     markets = api.fetch_markets(active_only=active_only, limit=limit)
+
+    # In batch_only mode: only add new markets, never update market_change for existing ones
+    if batch_only:
+        condition_ids = [m.get("condition_id") for m in markets if m.get("condition_id")]
+        existing: set[str] = set()
+        if condition_ids:
+            with db.get_session() as session:
+                existing = set(
+                    row[0]
+                    for row in session.execute(
+                        select(db.Market.market_id).where(db.Market.market_id.in_(condition_ids))
+                    )
+                )
+        markets = [m for m in markets if m.get("condition_id") not in existing]
+        log(f"Batch-only: {len(markets)} new markets to add (skipping {len(existing)} existing).")
+    else:
+        log(f"Scanning {len(markets)} markets...")
+
     total = len(markets)
-    log(f"Scanning {total} markets...")
+    if not markets:
+        return 0
 
     orderbooks: dict[str, dict[str, Any]] | None = None
     if batch_only:
@@ -358,6 +379,8 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
             except (TypeError, ValueError):
                 yes_price = 0.5
         no_price = 1.0 - yes_price
+        # Preserve status from DB so _derive_status doesn't return "unknown"
+        status = r.get("status") or "active"
         markets.append({
             "condition_id": r["market_id"],
             "question": r.get("question") or "",
@@ -369,6 +392,9 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
             "minimum_tick_size": r.get("minimum_tick_size"),
             "neg_risk": bool(r.get("neg_risk", False)),
             "tags": [r.get("market_category") or "uncategorized"],
+            "active": status == "active",
+            "closed": status == "closed",
+            "archived": status == "archived",
         })
 
     token_ids: list[str] = []

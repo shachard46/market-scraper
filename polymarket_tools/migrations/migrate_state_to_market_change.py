@@ -3,15 +3,17 @@ Migration: Move market state columns (volume, liquidity, last_trade_price)
 from markets to market_change.
 
 Run automatically via db.setup_db(). Can also be run standalone for existing DBs:
-    python -m polymarket_tools.migrate_state_to_market_change
+    python -m polymarket_tools.migrations.migrate_state_to_market_change
 """
 
 import sqlite3
 import sys
 from pathlib import Path
 
-# Add parent for imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Ensure project root is in path (when run as __main__)
+_root = Path(__file__).resolve().parent.parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
 
 from polymarket_tools.db import _get_db_path
 
