@@ -312,6 +312,40 @@ def fetch_market(identifier: str) -> dict[str, Any] | None:
         return None
 
 
+def _truthy(val: Any) -> bool:
+    """Return True if val is truthy; parse common string/API formats."""
+    if val is None:
+        return False
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes")
+    return bool(val)
+
+
+def _ensure_status_fields(m: dict[str, Any]) -> dict[str, Any]:
+    """
+    Ensure market has active/closed/archived for _derive_status.
+    CLOB API may omit these or use different formats.
+    """
+    m = dict(m)  # don't mutate original
+    active = m.get("active")
+    closed = m.get("closed")
+    archived = m.get("archived")
+    # If any are explicitly set, use them; else default to active
+    if active is None and closed is None and archived is None:
+        m["active"] = True
+        m["closed"] = False
+        m["archived"] = False
+    else:
+        m["active"] = _truthy(active) if active is not None else (not _truthy(closed) and not _truthy(archived))
+        m["closed"] = _truthy(closed) if closed is not None else False
+        m["archived"] = _truthy(archived) if archived is not None else False
+    return m
+
+
 def fetch_markets(active_only: bool = True, limit: int | None = None) -> list[dict[str, Any]]:
     """
     Fetch markets for scanning.
@@ -350,7 +384,7 @@ def fetch_markets(active_only: bool = True, limit: int | None = None) -> list[di
         if limit is not None and limit > 0:
             markets = markets[:limit]
         log(f"  Fetched {len(markets)} markets.")
-        return markets
+        return [_ensure_status_fields(m) for m in markets]
     except (requests.RequestException, ValueError) as e:
         raise RuntimeError(f"Failed to fetch markets: {e}") from e
 

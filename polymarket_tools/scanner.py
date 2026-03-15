@@ -379,6 +379,8 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
             except (TypeError, ValueError):
                 yes_price = 0.5
         no_price = 1.0 - yes_price
+        # Preserve status from DB so _derive_status doesn't return "unknown"
+        status = r.get("status") or "active"
         markets.append({
             "condition_id": r["market_id"],
             "question": r.get("question") or "",
@@ -390,6 +392,9 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
             "minimum_tick_size": r.get("minimum_tick_size"),
             "neg_risk": bool(r.get("neg_risk", False)),
             "tags": [r.get("market_category") or "uncategorized"],
+            "active": status == "active",
+            "closed": status == "closed",
+            "archived": status == "archived",
         })
 
     token_ids: list[str] = []
