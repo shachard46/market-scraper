@@ -138,16 +138,21 @@ poly-scan query_market_field <market_id> <field_name>
 ## Setup and Installation
 
 1. **Install dependencies:**
+
    ```bash
    pip install -r requirements.txt
    ```
+
    Or with pyproject:
+
    ```bash
    pip install -e .
    ```
+
    Required: `requests`, `sqlalchemy`.
 
 2. **Initialize the database (once):**
+
    ```bash
    poly-scan setup
    ```
