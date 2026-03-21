@@ -29,11 +29,37 @@ def _derive_status(m: dict[str, Any]) -> str:
     return "unknown"
 
 
+def _normalize_outcome_label(outcome: str | None) -> str:
+    """Lowercase/strip outcome; map short y/n to yes/no."""
+    if not outcome:
+        return ""
+    s = str(outcome).strip().lower()
+    if s == "y":
+        return "yes"
+    if s == "n":
+        return "no"
+    return s
+
+
 def _get_token_ids(m: dict[str, Any]) -> tuple[str | None, str | None]:
     """Extract yes and no token IDs from market tokens array."""
     tokens = m.get("tokens") or []
     if len(tokens) < 2:
         return (None, None)
+    yes_tid: str | None = None
+    no_tid: str | None = None
+    for t in tokens:
+        label = _normalize_outcome_label(t.get("outcome"))
+        tid = t.get("token_id")
+        if tid is None:
+            continue
+        s = str(tid)
+        if label == "yes" and yes_tid is None:
+            yes_tid = s
+        elif label == "no" and no_tid is None:
+            no_tid = s
+    if yes_tid and no_tid:
+        return (yes_tid, no_tid)
     first = tokens[0]
     second = tokens[1]
     if first.get("outcome", "").lower() == "yes" or second.get("outcome", "").lower() == "no":
@@ -144,12 +170,18 @@ def _persist_market(
     best_bid_yes, best_ask_yes = api.compute_bbo_from_orderbook(yes_book)
     best_bid_no, best_ask_no = api.compute_bbo_from_orderbook(no_book)
 
-    mid, spread = api.compute_midpoint_and_spread(best_bid_yes, best_ask_yes)
-    if mid is None:
-        mid, spread = api.compute_midpoint_and_spread(best_bid_no, best_ask_no)
+    mid_yes, spread_yes = api.compute_midpoint_and_spread(best_bid_yes, best_ask_yes)
+    if mid_yes is None:
+        mid_no, spread_no = api.compute_midpoint_and_spread(best_bid_no, best_ask_no)
+        if mid_no is not None:
+            mid_yes = 1.0 - mid_no
+            spread_yes = spread_no
 
-    yes_price = mid
-    no_price = (1.0 - mid) if mid is not None else None
+    midpoint_stored: float | None = mid_yes
+    spread_stored: float | None = spread_yes
+
+    yes_price = mid_yes
+    no_price = (1.0 - mid_yes) if mid_yes is not None else None
     use_api_for_price = orderbooks is None
     if yes_price is None:
         last = _get_last_trade_price(m, yes_token_id, yes_book=yes_book, use_api=use_api_for_price)
@@ -160,6 +192,8 @@ def _persist_market(
         if gamma_price is not None and abs(gamma_price - 0.5) > 0.05:
             yes_price = gamma_price
             no_price = 1.0 - yes_price
+            midpoint_stored = yes_price
+            spread_stored = None
     if no_price is None:
         no_price = 1.0 - yes_price if yes_price is not None else 0.0
 
@@ -189,8 +223,8 @@ def _persist_market(
         volume=volume if volume is not None else 0.0,
         liquidity=liquidity,
         last_trade_price=last_trade_price,
-        midpoint=mid,
-        spread=spread,
+        midpoint=midpoint_stored,
+        spread=spread_stored,
     )
     session.add(change)
     session.flush()
