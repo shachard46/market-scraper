@@ -13,7 +13,7 @@ The background polling loop runs automatically (e.g., via cron, systemd, or Open
 
 ## Available Tools
 
-Invoke these via the shell (e.g., `python -m polymarket_tools <command> [args]`). Run from the project root (`market-scarper/`) or ensure `polymarket_tools` is on `PYTHONPATH`.
+Invoke these via the shell with **`poly-scan`** (e.g., `poly-scan <command> [args]`). The CLI is installed with the package (e.g., `pip install -e .`); ensure `poly-scan` is on your `PATH`. Run from the project root (`market-scraper/`) or any working directory once installed.
 
 **Response format:** All market list commands (get_all_markets, get_category_markets, search_markets, get_open_markets, get_closed_markets) and get_market return each market with a nested `latest_change` object: `{ "datetime", "yes_price", "no_price", "volume", "liquidity", "last_trade_price", "midpoint", "spread" }` from the most recent `market_change` row. Volume and liquidity are stored in market_change and populated when the market was scanned via `scan --market` or sample_refresh.
 
@@ -22,7 +22,7 @@ Invoke these via the shell (e.g., `python -m polymarket_tools <command> [args]`)
 List all available markets. Each market includes `latest_change` (datetime, yes_price, no_price, volume, liquidity, last_trade_price, midpoint, spread).
 
 ```bash
-python -m polymarket_tools get_all_markets [--limit N]
+poly-scan get_all_markets [--limit N]
 ```
 
 - `--limit`: Max markets to return (default 50).
@@ -36,7 +36,7 @@ python -m polymarket_tools get_all_markets [--limit N]
 Return price/volume/midpoint/spread history for a specific market.
 
 ```bash
-python -m polymarket_tools get_market_trends <market_id> [--limit N]
+poly-scan get_market_trends <market_id> [--limit N]
 ```
 
 - `market_id`: Polymarket condition_id (e.g., `0x5eed579ff6763914d78a966c83473ba2485ac8910d0a0914eef6d9fcb33085de`).
@@ -51,7 +51,7 @@ python -m polymarket_tools get_market_trends <market_id> [--limit N]
 List markets filtered by category (from Polymarket tags). Supports multiple categories. Each market includes `latest_change`.
 
 ```bash
-python -m polymarket_tools get_category_markets <category> [category ...] [--limit N]
+poly-scan get_category_markets <category> [category ...] [--limit N]
 ```
 
 - `category`: One or more values of `market_category` (e.g., `Politics`, `Sports`, `All`). Markets matching any category are returned.
@@ -66,7 +66,7 @@ python -m polymarket_tools get_category_markets <category> [category ...] [--lim
 Search markets by keyword in question and description. Case-insensitive. By default, any keyword matches (OR). Use `--and` to require all keywords (AND). Each market includes `latest_change`.
 
 ```bash
-python -m polymarket_tools search_markets <keyword> [keyword ...] [--limit N] [--all] [--and]
+poly-scan search_markets <keyword> [keyword ...] [--limit N] [--all] [--and]
 ```
 
 - `keyword`: One or more search terms (e.g., `oil`, `price`). Default: any keyword matches (OR).
@@ -83,7 +83,7 @@ python -m polymarket_tools search_markets <keyword> [keyword ...] [--limit N] [-
 List markets that are closed or resolved. Each market includes `latest_change`.
 
 ```bash
-python -m polymarket_tools get_closed_markets [--limit N]
+poly-scan get_closed_markets [--limit N]
 ```
 
 - `--limit`: Max markets to return (default 50).
@@ -97,7 +97,7 @@ python -m polymarket_tools get_closed_markets [--limit N]
 List markets that are open and accepting orders. Each market includes `latest_change`.
 
 ```bash
-python -m polymarket_tools get_open_markets [--limit N]
+poly-scan get_open_markets [--limit N]
 ```
 
 - `--limit`: Max markets to return (default 50).
@@ -111,7 +111,7 @@ python -m polymarket_tools get_open_markets [--limit N]
 Return full market details including enriched fields (description, tags, extra_info, etc.) and `latest_change`. Volume and liquidity are in `latest_change` (from market_change); enriched metadata is populated when the market was scanned via `scan --market`.
 
 ```bash
-python -m polymarket_tools get_market <market_id>
+poly-scan get_market <market_id>
 ```
 
 - `market_id`: Polymarket condition_id (e.g., `0xb48621f7eba07b0a3eeabc6afb09ae42490239903997b9d412b0f69aeb040c8b`).
@@ -125,7 +125,7 @@ python -m polymarket_tools get_market <market_id>
 Return a single field value for a market (e.g., question, status, slug).
 
 ```bash
-python -m polymarket_tools query_market_field <market_id> <field_name>
+poly-scan query_market_field <market_id> <field_name>
 ```
 
 - `market_id`: Polymarket condition_id.
@@ -149,21 +149,21 @@ python -m polymarket_tools query_market_field <market_id> <field_name>
 
 2. **Initialize the database (once):**
    ```bash
-   python -m polymarket_tools setup
+   poly-scan setup
    ```
 
 3. **Start the background scanner** (choose one):
-   - Long-lived process: `python -m polymarket_tools poll --interval 5` (polls every 5 minutes).
-   - Gentle refresh: `python -m polymarket_tools sample_refresh` (200 markets/min, batch orderbooks only).
-   - Cron: `*/5 * * * * cd /path/to/market-scarper && python -m polymarket_tools scan && python -m polymarket_tools sync_closed_markets`
-   - OpenClaw schedule: use `ScheduleConfig` to run `python -m polymarket_tools scan` and `python -m polymarket_tools sync_closed_markets` periodically.
+   - Long-lived process: `poly-scan poll --interval 5` (polls every 5 minutes).
+   - Gentle refresh: `poly-scan sample_refresh` (200 markets/min, batch orderbooks only).
+   - Cron: `*/5 * * * * cd /path/to/market-scraper && poly-scan scan && poly-scan sync_closed_markets`
+   - OpenClaw schedule: use `ScheduleConfig` to run `poly-scan scan` and `poly-scan sync_closed_markets` periodically.
 
 ### scan
 
 Run a single scan of Polymarket markets and persist to the database. **By default scans only active markets** (via Gamma API). Use `--all` to include closed/archived markets (via CLOB API). Use `--market` to scan a single market and populate enriched fields (volume, liquidity, description, tags, etc.).
 
 ```bash
-python -m polymarket_tools scan [--limit N] [--all] [--batch-only] [--market ID_OR_SLUG]
+poly-scan scan [--limit N] [--all] [--batch-only] [--market ID_OR_SLUG]
 ```
 
 - `--limit`: Max markets to scan (default: all).
@@ -178,7 +178,7 @@ python -m polymarket_tools scan [--limit N] [--all] [--batch-only] [--market ID_
 Sync markets that have closed since the last scan. Queries the Gamma API for recently closed markets (closed=true, active=false) with pagination, then updates any DB records that are still marked `active` to `closed` and sets the resolved outcome.
 
 ```bash
-python -m polymarket_tools sync_closed_markets [--limit N]
+poly-scan sync_closed_markets [--limit N]
 ```
 
 - `--limit`: Max closed markets to fetch from API (default: 500). Uses pagination to retrieve the most recent closed markets.
@@ -190,7 +190,7 @@ python -m polymarket_tools sync_closed_markets [--limit N]
 Periodically refresh a sample of open markets from the DB, ordered by staleness (oldest-refreshed first). Each cycle uses one batch orderbook fetch (`POST /books`) plus per-market Gamma fetches to populate enriched columns (`volume`, `liquidity`, `description`, `tags`, `extra_info`, etc.). Run an initial `scan --batch-only` first to populate the DB.
 
 ```bash
-python -m polymarket_tools sample_refresh [--limit N] [--interval S]
+poly-scan sample_refresh [--limit N] [--interval S]
 ```
 
 - `--limit`: Markets to refresh per cycle (default: 200). Picks oldest-refreshed first (change_id ASC). Higher values increase per-cycle Gamma API load.
@@ -201,7 +201,7 @@ python -m polymarket_tools sample_refresh [--limit N] [--interval S]
 Run a background loop that periodically scans markets.
 
 ```bash
-python -m polymarket_tools poll [--interval M] [--limit N] [--all]
+poly-scan poll [--interval M] [--limit N] [--all]
 ```
 
 - `--interval`: Poll interval in minutes (default: 5).
@@ -213,7 +213,7 @@ python -m polymarket_tools poll [--interval M] [--limit N] [--all]
 
 4. **Mount the skill** (if using OpenClaw workspace):
    - Copy this skill directory to `~/.openclaw/workspace/skills/polymarket-scraper/`
-   - Or symlink: `ln -s /path/to/market-scarper/skills/polymarket-scraper ~/.openclaw/workspace/skills/polymarket-scraper`
+   - Or symlink: `ln -s /path/to/market-scraper/skills/polymarket-scraper ~/.openclaw/workspace/skills/polymarket-scraper`
    - Refresh skills or restart the OpenClaw gateway.
 
 ## Database
@@ -223,22 +223,22 @@ python -m polymarket_tools poll [--interval M] [--limit N] [--all]
 - Default path: `./polymarket.db`. Override with `POLYMARKET_DB_PATH`:
   ```bash
   export POLYMARKET_DB_PATH=/path/to/polymarket.db
-  python -m polymarket_tools get_all_markets
+  poly-scan get_all_markets
   ```
 
 ## Example Agent Workflow
 
 1. User: "What Polymarket markets are open?"
-   - Run: `python -m polymarket_tools get_open_markets --limit 20`
+   - Run: `poly-scan get_open_markets --limit 20`
 
 2. User: "Show me the price history for market 0xabc123..."
-   - Run: `python -m polymarket_tools get_market_trends 0xabc123... --limit 30`
+   - Run: `poly-scan get_market_trends 0xabc123... --limit 30`
 
 3. User: "What is the question for market 0xdef456...?"
-   - Run: `python -m polymarket_tools query_market_field 0xdef456... question`
+   - Run: `poly-scan query_market_field 0xdef456... question`
 
 4. User: "List closed politics markets."
-   - Run: `python -m polymarket_tools get_closed_markets --limit 50`, then filter by category Politics, or run `python -m polymarket_tools get_category_markets Politics` and filter client-side for closed status.
+   - Run: `poly-scan get_closed_markets --limit 50`, then filter by category Politics, or run `poly-scan get_category_markets Politics` and filter client-side for closed status.
 
 5. User: "Find oil markets" or "Search for markets about oil."
-   - Run: `python -m polymarket_tools search_markets oil --limit 20`
+   - Run: `poly-scan search_markets oil --limit 20`
