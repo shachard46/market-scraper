@@ -18,3 +18,6 @@ openclaw = ["openclaw-sdk"]
 
 [tool.setuptools.packages.find]
 include = ["polymarket_tools*"]
+
+[project.scripts]
+poly-scan = "polymarket_tools.__main__:main"
