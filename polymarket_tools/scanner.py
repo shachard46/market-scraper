@@ -42,7 +42,12 @@ def _normalize_outcome_label(outcome: str | None) -> str:
 
 
 def _get_token_ids(m: dict[str, Any]) -> tuple[str | None, str | None]:
-    """Extract yes and no token IDs from market tokens array."""
+    """Extract yes and no token IDs from market tokens array.
+
+    Relies on _build_tokens guaranteeing index 0 = YES, index 1 = NO for
+    Gamma-sourced data. The label loop handles any remaining edge cases;
+    the fallback trusts position directly.
+    """
     tokens = m.get("tokens") or []
     if len(tokens) < 2:
         return (None, None)
@@ -60,13 +65,8 @@ def _get_token_ids(m: dict[str, Any]) -> tuple[str | None, str | None]:
             no_tid = s
     if yes_tid and no_tid:
         return (yes_tid, no_tid)
-    first = tokens[0]
-    second = tokens[1]
-    if first.get("outcome", "").lower() == "yes" or second.get("outcome", "").lower() == "no":
-        return (first.get("token_id"), second.get("token_id"))
-    if second.get("outcome", "").lower() == "yes" or first.get("outcome", "").lower() == "no":
-        return (second.get("token_id"), first.get("token_id"))
-    return (first.get("token_id"), second.get("token_id"))
+    t0, t1 = tokens[0].get("token_id"), tokens[1].get("token_id")
+    return (str(t0) if t0 else None, str(t1) if t1 else None)
 
 
 def _get_outcome(m: dict[str, Any]) -> str | None:
@@ -107,6 +107,8 @@ def _get_token_price_from_market(m: dict[str, Any], yes_token_id: str | None) ->
             except (TypeError, ValueError):
                 pass
     return None
+
+
 
 
 def _get_last_trade_price(

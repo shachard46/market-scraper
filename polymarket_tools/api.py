@@ -43,6 +43,8 @@ def _build_tokens(token_ids: list, outcomes: list[str], prices: list[str]) -> li
 
     For resolved/closed markets, outcomePrices are typically ["1","0"] or ["0","1"];
     the outcome with price 1.0 is marked as winner.
+
+    Output is always sorted YES-first so callers can rely on index 0 = YES, index 1 = NO.
     """
     tokens = []
     for tid, outcome, price in zip(token_ids[:2], outcomes[:2], prices[:2]):
@@ -61,6 +63,7 @@ def _build_tokens(token_ids: list, outcomes: list[str], prices: list[str]) -> li
             "price": 0.5,
             "winner": False,
         })
+    tokens.sort(key=lambda t: 0 if str(t.get("outcome", "")).strip().lower() in ("yes", "y") else 1)
     return tokens
 
 
