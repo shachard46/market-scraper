@@ -26,6 +26,15 @@ DEFAULT_OUTCOMES = ["Yes", "No"]
 DEFAULT_PRICES = ["0.5", "0.5"]
 
 
+def _outcome_sort_key(token: dict[str, Any]) -> int:
+    label = str(token.get("outcome", "")).strip().lower()
+    if label in ("yes", "y"):
+        return 0
+    if label in ("no", "n"):
+        return 1
+    return 2
+
+
 def _parse_json_field(value: str | list | None, default: list[str]) -> list:
     """Parse JSON string or return list. Returns default on decode error."""
     if value is None:
@@ -63,7 +72,7 @@ def _build_tokens(token_ids: list, outcomes: list[str], prices: list[str]) -> li
             "price": 0.5,
             "winner": False,
         })
-    tokens.sort(key=lambda t: 0 if str(t.get("outcome", "")).strip().lower() in ("yes", "y") else 1)
+    tokens.sort(key=_outcome_sort_key)
     return tokens
 
 

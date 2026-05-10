@@ -3,7 +3,17 @@
 import unittest
 
 from polymarket_tools import api
-from polymarket_tools.scanner import _get_token_ids
+from polymarket_tools.scanner import _binary_market_view, _get_token_ids, choose_yes_price
+
+
+def _book(bid=None, ask=None, last=None):
+    book = {
+        "bids": [] if bid is None else [{"price": str(bid), "size": "1"}],
+        "asks": [] if ask is None else [{"price": str(ask), "size": "1"}],
+    }
+    if last is not None:
+        book["last_trade_price"] = str(last)
+    return book
 
 
 class TestBuildTokensYesFirst(unittest.TestCase):
@@ -84,6 +94,16 @@ class TestGetTokenIds(unittest.TestCase):
         }
         self.assertEqual(_get_token_ids(m), ("a", "b"))
 
+    def test_unknown_labels_do_not_fall_back_to_position(self):
+        m = {
+            "tokens": [
+                {"token_id": "a", "outcome": "Up"},
+                {"token_id": "b", "outcome": "Down"},
+            ]
+        }
+        self.assertEqual(_get_token_ids(m), (None, None))
+        self.assertIsNone(_binary_market_view(m))
+
 
 class TestYesMidFromNoBook(unittest.TestCase):
     """Mirror _persist_market: NO book mid implies YES mid = 1 - mid_no."""
@@ -100,6 +120,56 @@ class TestYesMidFromNoBook(unittest.TestCase):
         self.assertAlmostEqual(mid_no, 0.30)
         self.assertAlmostEqual(mid_yes, 0.70)
         self.assertAlmostEqual(spread_yes, spread_no)
+
+
+class TestChooseYesPrice(unittest.TestCase):
+    def test_tight_yes_midpoint_beats_ltp(self):
+        yes_price, no_price, midpoint, spread = choose_yes_price(
+            _book(0.62, 0.66, last=0.20),
+            _book(0.34, 0.38),
+            gamma_yes_price=0.30,
+            yes_last_trade_price=0.20,
+        )
+        self.assertAlmostEqual(yes_price, 0.64)
+        self.assertAlmostEqual(no_price, 0.36)
+        self.assertAlmostEqual(midpoint, 0.64)
+        self.assertAlmostEqual(spread, 0.04)
+
+    def test_wide_meaningless_midpoint_uses_yes_ltp(self):
+        yes_price, no_price, midpoint, spread = choose_yes_price(
+            _book(0.20, 0.80, last=0.72),
+            _book(0.20, 0.80),
+            gamma_yes_price=0.68,
+            yes_last_trade_price=0.72,
+        )
+        self.assertAlmostEqual(yes_price, 0.72)
+        self.assertAlmostEqual(no_price, 0.28)
+        self.assertAlmostEqual(midpoint, 0.50)
+        self.assertAlmostEqual(spread, 0.60)
+
+    def test_no_book_tight_midpoint_is_complemented(self):
+        yes_price, no_price, midpoint, spread = choose_yes_price(
+            None,
+            _book(0.25, 0.31),
+            gamma_yes_price=None,
+            yes_last_trade_price=None,
+        )
+        self.assertAlmostEqual(yes_price, 0.72)
+        self.assertAlmostEqual(no_price, 0.28)
+        self.assertAlmostEqual(midpoint, 0.72)
+        self.assertAlmostEqual(spread, 0.06)
+
+    def test_neutral_midpoint_falls_back_to_gamma_when_no_ltp(self):
+        yes_price, no_price, midpoint, spread = choose_yes_price(
+            _book(0.49, 0.51),
+            None,
+            gamma_yes_price=0.67,
+            yes_last_trade_price=None,
+        )
+        self.assertAlmostEqual(yes_price, 0.67)
+        self.assertAlmostEqual(no_price, 0.33)
+        self.assertAlmostEqual(midpoint, 0.50)
+        self.assertAlmostEqual(spread, 0.02)
 
 
 if __name__ == "__main__":

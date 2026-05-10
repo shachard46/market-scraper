@@ -6,16 +6,28 @@ market_change, then UPSERTs into markets using SQLAlchemy's SQLite insert.
 """
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert
 
 PROGRESS_INTERVAL = 50
+MAX_DISPLAY_SPREAD = 0.10
+NEUTRAL_MIDPOINT_EPSILON = 0.005
+GAMMA_PRIOR_DISAGREEMENT = 0.08
 
 from . import api, db, tools
 from .log import log
 from .db import Market, MarketChange
+
+
+@dataclass(frozen=True)
+class BinaryMarket:
+    yes_token_id: str
+    no_token_id: str
+    gamma_yes_price: float | None
+    gamma_no_price: float | None
 
 
 def _derive_status(m: dict[str, Any]) -> str:
@@ -41,32 +53,51 @@ def _normalize_outcome_label(outcome: str | None) -> str:
     return s
 
 
-def _get_token_ids(m: dict[str, Any]) -> tuple[str | None, str | None]:
-    """Extract yes and no token IDs from market tokens array.
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
-    Relies on _build_tokens guaranteeing index 0 = YES, index 1 = NO for
-    Gamma-sourced data. The label loop handles any remaining edge cases;
-    the fallback trusts position directly.
-    """
+
+def _binary_market_view(m: dict[str, Any]) -> BinaryMarket | None:
+    """Return canonical YES/NO token IDs and Gamma prices for binary markets."""
     tokens = m.get("tokens") or []
     if len(tokens) < 2:
-        return (None, None)
-    yes_tid: str | None = None
-    no_tid: str | None = None
+        return None
+    yes_token: dict[str, Any] | None = None
+    no_token: dict[str, Any] | None = None
     for t in tokens:
         label = _normalize_outcome_label(t.get("outcome"))
         tid = t.get("token_id")
         if tid is None:
             continue
-        s = str(tid)
-        if label == "yes" and yes_tid is None:
-            yes_tid = s
-        elif label == "no" and no_tid is None:
-            no_tid = s
-    if yes_tid and no_tid:
-        return (yes_tid, no_tid)
-    t0, t1 = tokens[0].get("token_id"), tokens[1].get("token_id")
-    return (str(t0) if t0 else None, str(t1) if t1 else None)
+        if label == "yes" and yes_token is None:
+            yes_token = t
+        elif label == "no" and no_token is None:
+            no_token = t
+    if not yes_token or not no_token:
+        return None
+    yes_tid = yes_token.get("token_id")
+    no_tid = no_token.get("token_id")
+    if not yes_tid or not no_tid:
+        return None
+    return BinaryMarket(
+        yes_token_id=str(yes_tid),
+        no_token_id=str(no_tid),
+        gamma_yes_price=_float_or_none(yes_token.get("price")),
+        gamma_no_price=_float_or_none(no_token.get("price")),
+    )
+
+
+def _get_token_ids(m: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Extract explicit YES and NO token IDs from a binary market."""
+    binary = _binary_market_view(m)
+    if binary is None:
+        return (None, None)
+    return (binary.yes_token_id, binary.no_token_id)
 
 
 def _get_outcome(m: dict[str, Any]) -> str | None:
@@ -86,54 +117,73 @@ def _get_market_category(m: dict[str, Any]) -> str:
     return "uncategorized"
 
 
-def _get_token_price_from_market(m: dict[str, Any], yes_token_id: str | None) -> float | None:
-    """Get price from tokens[].price (Gamma outcomePrices). Prefer yes token."""
-    tokens = m.get("tokens") or []
-    if yes_token_id:
-        for t in tokens:
-            if str(t.get("token_id", "")) == str(yes_token_id):
-                p = t.get("price")
-                if p is not None:
-                    try:
-                        return float(p)
-                    except (TypeError, ValueError):
-                        pass
-                break
-    for t in tokens:
-        p = t.get("price")
-        if p is not None:
-            try:
-                return float(p)
-            except (TypeError, ValueError):
-                pass
-    return None
-
-
-
-
-def _get_last_trade_price(
+def _get_yes_last_trade_price(
     m: dict[str, Any],
     yes_token_id: str | None,
     yes_book: dict[str, Any] | None = None,
     use_api: bool = True,
 ) -> float | None:
     """
-    Get last trade price from multiple sources in priority order.
+    Get the YES token's last trade/market price from CLOB sources.
 
     1. orderbook.last_trade_price (from batch response)
-    2. tokens[].price (Gamma outcomePrices)
-    3. API fetch (only when use_api=True, e.g. scan_single_market)
+    2. API fetch (only when use_api=True, e.g. scan_single_market)
+
+    Gamma outcomePrices are intentionally not returned here; they are a separate
+    fallback for yes_price, not the stored last_trade_price observation.
     """
     if yes_book:
         p = api.last_trade_price_from_book(yes_book)
         if p is not None:
             return p
-    p = _get_token_price_from_market(m, yes_token_id)
-    if p is not None:
-        return p
     if use_api and yes_token_id:
         return api.fetch_last_trade_price(yes_token_id)
     return None
+
+
+def _is_meaningful_midpoint(midpoint: float | None, spread: float | None) -> bool:
+    """Return True when midpoint is tight enough to behave like display price."""
+    if midpoint is None or spread is None:
+        return False
+    if spread > MAX_DISPLAY_SPREAD:
+        return False
+    return abs(midpoint - 0.5) > NEUTRAL_MIDPOINT_EPSILON
+
+
+def choose_yes_price(
+    yes_book: dict[str, Any] | None,
+    no_book: dict[str, Any] | None,
+    gamma_yes_price: float | None,
+    *,
+    yes_last_trade_price: float | None = None,
+) -> tuple[float, float, float | None, float | None]:
+    """
+    Choose the canonical YES price while preserving raw book summary columns.
+
+    yes_price is the scanner's display-style YES probability. midpoint/spread are
+    book-derived summaries and can differ from yes_price when the book is wide
+    or stuck near a meaningless 0.5 midpoint.
+    """
+    best_bid_yes, best_ask_yes = api.compute_bbo_from_orderbook(yes_book)
+    best_bid_no, best_ask_no = api.compute_bbo_from_orderbook(no_book)
+    mid_yes, spread_yes = api.compute_midpoint_and_spread(best_bid_yes, best_ask_yes)
+    mid_no, spread_no = api.compute_midpoint_and_spread(best_bid_no, best_ask_no)
+
+    midpoint_stored = mid_yes if mid_yes is not None else (1.0 - mid_no if mid_no is not None else None)
+    spread_stored = spread_yes if spread_yes is not None else spread_no
+
+    if _is_meaningful_midpoint(mid_yes, spread_yes):
+        yes_price = mid_yes
+    elif _is_meaningful_midpoint(mid_no, spread_no):
+        yes_price = 1.0 - mid_no
+    elif yes_last_trade_price is not None:
+        yes_price = yes_last_trade_price
+    elif gamma_yes_price is not None:
+        yes_price = gamma_yes_price
+    else:
+        yes_price = 0.5
+
+    return yes_price, 1.0 - yes_price, midpoint_stored, spread_stored
 
 
 def _persist_market(
@@ -159,9 +209,10 @@ def _persist_market(
     if not condition_id:
         return False
 
-    yes_token_id, no_token_id = _get_token_ids(m)
-    if not yes_token_id or not no_token_id:
+    binary = _binary_market_view(m)
+    if binary is None:
         return False
+    yes_token_id, no_token_id = binary.yes_token_id, binary.no_token_id
 
     if orderbooks is not None:
         yes_book = orderbooks.get(yes_token_id)
@@ -169,38 +220,15 @@ def _persist_market(
     else:
         yes_book = api.fetch_orderbook(yes_token_id)
         no_book = api.fetch_orderbook(no_token_id)
-    best_bid_yes, best_ask_yes = api.compute_bbo_from_orderbook(yes_book)
-    best_bid_no, best_ask_no = api.compute_bbo_from_orderbook(no_book)
-
-    mid_yes, spread_yes = api.compute_midpoint_and_spread(best_bid_yes, best_ask_yes)
-    if mid_yes is None:
-        mid_no, spread_no = api.compute_midpoint_and_spread(best_bid_no, best_ask_no)
-        if mid_no is not None:
-            mid_yes = 1.0 - mid_no
-            spread_yes = spread_no
-
-    midpoint_stored: float | None = mid_yes
-    spread_stored: float | None = spread_yes
-
-    yes_price = mid_yes
-    no_price = (1.0 - mid_yes) if mid_yes is not None else None
     use_api_for_price = orderbooks is None
-    if yes_price is None:
-        last = _get_last_trade_price(m, yes_token_id, yes_book=yes_book, use_api=use_api_for_price)
-        yes_price = last if last is not None else 0.0
-    # Batch mode: BBO midpoint often spuriously 0.5; prefer Gamma outcomePrices when they disagree
-    if orderbooks is not None and yes_price == 0.5:
-        gamma_price = _get_token_price_from_market(m, yes_token_id)
-        if gamma_price is not None and abs(gamma_price - 0.5) > 0.05:
-            yes_price = gamma_price
-            no_price = 1.0 - yes_price
-            midpoint_stored = yes_price
-            spread_stored = None
-    if no_price is None:
-        no_price = 1.0 - yes_price if yes_price is not None else 0.0
-
-    last_trade_price = _get_last_trade_price(
+    last_trade_price = _get_yes_last_trade_price(
         m, yes_token_id, yes_book=yes_book, use_api=use_api_for_price
+    )
+    yes_price, no_price, midpoint_stored, spread_stored = choose_yes_price(
+        yes_book,
+        no_book,
+        binary.gamma_yes_price,
+        yes_last_trade_price=last_trade_price,
     )
 
     volume = enriched.get("volume") if enriched else None
@@ -406,7 +434,7 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
     markets: list[dict[str, Any]] = []
     for r in rows:
         latest = r.get("latest_change") or {}
-        yes_price = latest.get("last_trade_price") or latest.get("yes_price")
+        yes_price = latest.get("yes_price")
         if yes_price is None:
             yes_price = 0.5
         else:
@@ -417,6 +445,33 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
         no_price = 1.0 - yes_price
         # Preserve status from DB so _derive_status doesn't return "unknown"
         status = r.get("status") or "active"
+        gamma_market = None
+        enriched: dict[str, Any] | None = None
+        slug = r.get("slug") or ""
+        identifier = slug if slug else r["market_id"]
+        try:
+            gamma_market = api.fetch_market(identifier)
+            if gamma_market:
+                enriched = api._extract_enriched_fields(gamma_market)
+                gamma_binary = _binary_market_view(api._gamma_to_clob_format(gamma_market))
+                if (
+                    gamma_binary
+                    and gamma_binary.gamma_yes_price is not None
+                    and abs(yes_price - gamma_binary.gamma_yes_price) > GAMMA_PRIOR_DISAGREEMENT
+                ):
+                    yes_price = gamma_binary.gamma_yes_price
+                    no_price = 1.0 - yes_price
+            else:
+                log(
+                    f"  [sample_refresh] No Gamma data for {r['market_id']}; "
+                    "persisting without enriched fields."
+                )
+        except Exception as e:
+            log(
+                f"  [sample_refresh] Enriched fetch failed for {r['market_id']}: {e}; "
+                "persisting without enriched fields."
+            )
+
         markets.append({
             "condition_id": r["market_id"],
             "question": r.get("question") or "",
@@ -431,6 +486,7 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
             "active": status == "active",
             "closed": status == "closed",
             "archived": status == "archived",
+            "_enriched": enriched,
         })
 
     token_ids: list[str] = []
@@ -448,26 +504,7 @@ def refresh_sample_open_markets(limit: int = 200) -> int:
     processed = 0
     with db.get_session() as session:
         for m in markets:
-            condition_id = m.get("condition_id")
-            enriched: dict[str, Any] | None = None
-            if condition_id:
-                slug = m.get("market_slug") or ""
-                identifier = slug if slug else condition_id
-                try:
-                    gamma_market = api.fetch_market(identifier)
-                    if gamma_market:
-                        enriched = api._extract_enriched_fields(gamma_market)
-                    else:
-                        log(
-                            f"  [sample_refresh] No Gamma data for {condition_id}; "
-                            "persisting without enriched fields."
-                        )
-                except Exception as e:
-                    log(
-                        f"  [sample_refresh] Enriched fetch failed for {condition_id}: {e}; "
-                        "persisting without enriched fields."
-                    )
-
+            enriched = m.pop("_enriched", None)
             if _persist_market(session, m, enriched=enriched, orderbooks=orderbooks):
                 processed += 1
                 if processed % PROGRESS_INTERVAL == 0:
