@@ -508,8 +508,10 @@ def compute_bbo_from_orderbook(book: dict[str, Any] | None) -> tuple[float | Non
         return (None, None)
     bids = book.get("bids") or []
     asks = book.get("asks") or []
-    best_bid = float(bids[0]["price"]) if bids else None
-    best_ask = float(asks[0]["price"]) if asks else None
+    # The CLOB API returns bids ascending (worst first) and asks descending (worst first).
+    # Use max/min to extract the true best bid and best ask regardless of sort order.
+    best_bid = max(float(b["price"]) for b in bids) if bids else None
+    best_ask = min(float(a["price"]) for a in asks) if asks else None
     return (best_bid, best_ask)
 
 
